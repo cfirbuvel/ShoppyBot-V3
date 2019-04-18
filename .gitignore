@@ -1,0 +1,9 @@
+.idea/
+__pycache__/
+db.sqlite
+dump.rdb
+__pycache__/
+src/locales.py
+env/
+*.pyc
+shoppybot.conf

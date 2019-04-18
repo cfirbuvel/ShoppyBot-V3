@@ -1,0 +1,77 @@
+shoppybot setup instructions
+============================
+
+1. Create a Telegram bot using https://t.me/BotFather
+    1.1. Use /newbot to create the bot.
+    1.2. Give it some descriptive name (can be changed later).
+    1.3. Give it some user name (cannot be changed, must end with Bot or _bot).
+    1.4. Set the bot description (add a tip that /start command will activate the bot).
+    1.5. Add /start command to bot's command listing.
+
+2. Make sure you have the necessary channels for your shop:
+    * Customers (not required).
+    * Reviews (required).
+    * Service (required, order information will be sent here).
+
+    Add the bot as an admin to the service channel.
+
+3. Edit shoppybot.conf and change the bot settings as required.
+   An example settings file is provided. Make sure `api_token` is
+   set to the token value provided by @BotFather.
+
+    Note: in order to get the ID for the private service channel, open Telegram Web at:
+    https://web.telegram.org/#/im
+
+    Open the delivery channel and look at the location bar in the browser.
+    It should look like following:
+    https://web.telegram.org/#/im?p=c1166426041_16243197304264104989
+
+    Copy the first half of the long numeric string (in this case 1166426041).
+    Add `-100` prefix to the string, so it will look like -1001166426041.
+    Copy the result into service_channel option in the config file.
+
+4. Check that shoppybot_db.sqlite is present. A default database
+    with a few example products is provided.
+
+5. Install the dependencies for the current user:
+
+    pip3 install --user python-telegram-bot
+
+    OR systemwide (not recommended):
+
+    pip3 install python-telegram-bot
+
+    On Debian system pip command might not be installed by default.
+    In order to install it type:
+
+    sudo apt install python3-pip
+
+6. Unpack shoppybot package somewhere:
+
+    tar -xzvf shoppybot.tar.gz
+
+7. Navigate to package directory and start the bot as follows:
+
+    cd shoppybot
+    ./shoppybot.py
+
+Stop the bot by pressing Ctrl+C.
+
+For more information regarding hosting the bot refer to:
+https://github.com/python-telegram-bot/python-telegram-bot/wiki/Hosting-your-bot
+
+Error messages and other information will be printed to stderr by default.
+
+Delivery fee is currently fixed and specified in config file.
+
+You can edit the product database (prices, pictures, etc.) locally
+using any SQLite editing tools, for example http://sqlitebrowser.org/
+
+Technical improvements for future versions:
+
+* Connect to database via Python DB-API - for big installations it might make sense
+  to switch from sqlite to e.g. mysql
+* Implement per-user or per-chat session manager for storing cart contents and shipping info
+* Persistent database for customer data (addresses, pictures, etc.)
+* Message templates for order confirmation, etc.
+* Persistent conversations (if bot restarted, conversation continues from the same point)
