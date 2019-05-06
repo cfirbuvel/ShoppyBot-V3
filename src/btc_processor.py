@@ -6,19 +6,18 @@ from telegram.ext.dispatcher import run_async
 from .btc_wrapper import BtcWallet, BtcError
 from .btc_settings import BtcSettings
 from .helpers import is_vip_customer, config, get_channel_trans, quantize_btc
-from .keyboards import create_service_channel_keyboard, create_bitcoin_retry_keyboard
-from .models import BtcStatus, BtcStage, BitcoinCredentials, Order, OrderBtcPayment
+from .keyboards import service_channel_keyboard, create_bitcoin_retry_keyboard
+from .models import BtcStatus, BtcStage, BitcoinCredentials, Order, OrderBtcPayment, BtcProc
 from .messages import create_service_notice, get_payment_status_msg
 from . import shortcuts
 
 
 def start_orders_processing(bot):
     orders = Order.select().join(OrderBtcPayment)\
-        .where(Order.canceled == False, Order.delivered == False, Order.btc_payment == True,
+        .where(Order.btc_payment == True, Order.status.in_(Order.PROCESSING, Order.CONFIRMED),
                ((OrderBtcPayment.payment_stage == BtcStage.FIRST)
                 | ((OrderBtcPayment.payment_stage == BtcStage.SECOND) & (OrderBtcPayment.paid_status.not_in([BtcStatus.PAID, BtcStatus.HIGHER])))
                 ))
-    print('orders debug')
     for o in orders:
         # set_btc_proc(o.id)
         print(o.id)
@@ -54,17 +53,13 @@ def save_order_refresh_msg(trans, bot, order, status, balance):
     btc_data = OrderBtcPayment.get(order=order)
     btc_data.balance = balance
     btc_data.paid_status = status
-    order_data = OrderPhotos.get(order=order)
-    user_id = order.user.telegram_id
-    is_vip = is_vip_customer(bot, user_id)
-    order_msg = create_service_notice(_, order, is_vip, btc_data)
+    order_msg = create_service_notice(_, order, btc_data)
     service_channel = config.get_service_channel()
-    keyboard = create_service_channel_keyboard(_, order)
+    keyboard = service_channel_keyboard(_, order)
     msg_id = shortcuts.edit_channel_msg(bot, order_msg, service_channel,
-                                        order_data.order_text_msg_id, keyboard, order)
-    order_data.order_text_msg_id = msg_id
-    order_data.order_text = order_msg
-    order_data.save()
+                                        order.order_text_msg_id, keyboard, order)
+    order.order_text_msg_id = msg_id
+    order.save()
     btc_data.save()
     return btc_data
 
@@ -184,19 +179,14 @@ def process_btc_second_stage(bot, order):
 
 
 def clear_procs(order_id):
-    procs = session_client.json_get('btc_procs')
-    if procs:
-        procs.remove(order_id)
-        session_client.json_set('btc_procs', procs)
+    BtcProc.delete().execute()
 
 
 def set_btc_proc(order_id):
-    procs = session_client.json_get('btc_procs')
-    if not procs:
-        procs = [order_id]
-    else:
-        procs.append(order_id)
-    session_client.json_set('btc_procs', procs)
+    try:
+        proc = BtcProc.get(order_id=order_id)
+    except BtcProc.DoesNotExist:
+        BtcProc.create(order_id=order_id)
 
 
 

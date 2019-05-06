@@ -530,30 +530,30 @@ def enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id=None, q
     return enums.BOT_ORDER_CONFIRMATION
 
 
-def enter_state_init_order_confirmed(bot, update, user_data, order):
-    user_id = get_user_id(update)
-    total = cart.get_cart_total(get_user_session(user_id))
-    _ = get_trans(user_id)
-    chat_id = update.message.chat_id
-    if order.btc_payment:
-        btc_data = OrderBtcPayment.get(order=order)
-        msg = _('Please transfer *{}* BTC to address:').format(btc_data.amount)
-        msg += '\n'
-        msg += _('*{}*').format(btc_data.address)
-        bot.send_message(chat_id, text=msg, parse_mode=ParseMode.MARKDOWN)
-    user = User.get(telegram_id=user_id)
-    first_name = escape_markdown(update.efective_user.first_name)
-    bot.send_message(
-        chat_id,
-        text=config.get_order_complete_text().format(
-            update.effective_user.first_name),
-        reply_markup=ReplyKeyboardRemove(),
-    )
-    bot.send_message(
-        chat_id,
-        text='〰〰〰〰〰〰〰〰〰〰〰〰️',
-        reply_markup=main_keyboard(_, config.get_reviews_channel(), user, is_admin(bot, user_id), total),
-    )
-
-    return BOT_STATE_INIT
+# def enter_state_init_order_confirmed(bot, update, user_data, order):
+#     user_id = get_user_id(update)
+#     total = cart.get_cart_total(get_user_session(user_id))
+#     _ = get_trans(user_id)
+#     chat_id = update.message.chat_id
+#     if order.btc_payment:
+#         btc_data = OrderBtcPayment.get(order=order)
+#         msg = _('Please transfer *{}* BTC to address:').format(btc_data.amount)
+#         msg += '\n'
+#         msg += _('*{}*').format(btc_data.address)
+#         bot.send_message(chat_id, text=msg, parse_mode=ParseMode.MARKDOWN)
+#     user = User.get(telegram_id=user_id)
+#     first_name = escape_markdown(update.efective_user.first_name)
+#     bot.send_message(
+#         chat_id,
+#         text=config.get_order_complete_text().format(
+#             update.effective_user.first_name),
+#         reply_markup=ReplyKeyboardRemove(),
+#     )
+#     bot.send_message(
+#         chat_id,
+#         text='〰〰〰〰〰〰〰〰〰〰〰〰️',
+#         reply_markup=main_keyboard(_, config.get_reviews_channel(), user, is_admin(bot, user_id), total),
+#     )
+#
+#     return BOT_STATE_INIT
 

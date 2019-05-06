@@ -40,7 +40,7 @@ from . import keyboards, messages, states
 #         _ = get_trans(courier_id)
 #         bot.send_message(courier_id,
 #                          text=order_data.order_text,
-#                          reply_markup=keyboards.create_courier_order_status_keyboard(_, order_id),
+#                          reply_markup=keyboards.courier_order_status_keyboard(_, order_id),
 #                          parse_mode=ParseMode.MARKDOWN)
 
 
@@ -73,7 +73,7 @@ from . import keyboards, messages, states
 #         order_location = order_info.location
 #         if order_location:
 #             order_location = order_location.title
-#         keyboard = keyboards.create_service_notice_keyboard(order_id, _, answers_ids, order_location, order_pickup_state)
+#         keyboard = keyboards.service_notice_keyboard(order_id, _, answers_ids, order_location, order_pickup_state)
 #         send_channel_msg(bot, order_data.order_text, couriers_channel, keyboard, order)
 
 
@@ -106,14 +106,14 @@ from . import keyboards, messages, states
 #     order_location = order_info.location
 #     if order_location:
 #         order_location = order_location.title
-#     keyboard = keyboards.create_service_notice_keyboard(order_id, _, answers_ids, order_location, order_pickup_state)
+#     keyboard = keyboards.service_notice_keyboard(order_id, _, answers_ids, order_location, order_pickup_state)
 #     send_channel_msg(bot, order_data.order_text, couriers_channel, keyboard, order)
 #     query.answer(text=_('Order sent to couriers channel'), show_alert=True)
 
 
 # def bot_send_order_msg(_, bot, chat_id, message, order_id, order_data=None, channel=False, parse_mode=ParseMode.MARKDOWN):
 #     order = Order.get(id=order_id)
-#     keyboard = keyboards.create_show_order_keyboard(_, order_id)
+#     keyboard = keyboards.show_order_keyboard(_, order_id)
 #     if channel:
 #         msg_id = send_channel_msg(bot, message, chat_id, keyboard, order, parse_mode)
 #     else:
@@ -241,11 +241,9 @@ def initialize_calendar(_, bot, user_data, chat_id, state, message_id=None, quer
     return state
 
 
-def initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query_id, msg=None, cancel=False):
+def initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query_id, msg, cancel=False):
     current_time = datetime.datetime.now()
     hour, minute = current_time.hour, current_time.minute
-    if not msg:
-        msg = _('Please select time')
     user_data['time_picker'] = {'hour': hour, 'minute': minute, 'msg': msg, 'cancel': cancel, 'state': state}
     reply_markup = keyboards.time_picker_keyboard(_, hour, minute, cancel)
     if msg_id:
@@ -317,6 +315,29 @@ def get_order_count_and_price(*subqueries):
     return orders_count, total_price, product_text
 
 
+def check_order_products_credits(order, courier=None):
+
+    for order_item in order.order_items:
+        product = order_item.product
+        if product.warehouse_active:
+            if courier:
+                try:
+                    warehouse = ProductWarehouse.get(product=product, courier=courier)
+                    warehouse_count = warehouse.count
+                except ProductWarehouse.DoesNotExist:
+                    warehouse_count = 0
+                    # warehouse = ProductWarehouse(product=product, courier=courier)
+                    # warehouse.save()
+            else:
+                warehouse_count = product.credits
+
+        product_warehouse = ProductWarehouse.get(product=product)
+        product_warehouse_count = product_warehouse.count
+        if product_warehouse_count <= 0:
+            not_defined = True
+            return not_defined
+
+
 def check_order_products_credits(order, trans, courier=None):
     msg = ''
     first_msg = True
@@ -334,9 +355,9 @@ def check_order_products_credits(order, trans, courier=None):
             warehouse_count = product.credits
         product_warehouse = ProductWarehouse.get(product=product)
         product_warehouse_count = product_warehouse.count
-        if product_warehouse_count <= 0:
-            not_defined = True
-            return not_defined
+        # if product_warehouse_count <= 0:
+        #     not_defined = True
+        #     return not_defined
         if order_item.count > warehouse_count:
             _ = trans
             product_title = escape_markdown(product.title.replace('`', ''))
@@ -526,3 +547,12 @@ def remove_user_registration(user):
     user.permission = UserPermission.NOT_REGISTERED
     user.phone_number = None
     user.save()
+
+
+# def black_list_user(_, bot, user):
+#     user.banned = True
+#     user.save()
+#     user_trans = get_trans(user.telegram_id)
+#     msg = user_trans('{}, you have been black-listed').format(user.username)
+#     bot.send_message(user.telegram_id, msg)
+#     msg = _('*{}* has been added to black-list!').format(username)

@@ -119,67 +119,30 @@ def main():
                 CallbackQueryHandler(handlers.on_time_picker_change, pattern='^time_picker', pass_user_data=True),
                 CallbackQueryHandler(handlers.on_order_time_select, pass_user_data=True)
             ],
-            # enums.BOT_CHECKOUT_LOCATION_PICKUP: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.on_shipping_pickup_location,
-            #                    pass_user_data=True),
-            # ],
-            # enums.BOT_CHECKOUT_LOCATION_DELIVERY: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text | Filters.location,
-            #                    handlers.on_shipping_delivery_address,
-            #                    pass_user_data=True),
-            # ],
-            # enums.BOT_CHECKOUT_TIME: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.on_checkout_time,
-            #                    pass_user_data=True),
-            # ],
-            # enums.BOT_CHECKOUT_TIME_TEXT: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.on_shipping_time_text,
-            #                    pass_user_data=True),
-            # ],
-            # enums.BOT_CHECKOUT_PHONE_NUMBER: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #
-            #     MessageHandler(Filters.contact | Filters.text,
-            #                    handlers.on_phone_number_text, pass_user_data=True),
-            # ],
-            # enums.BOT_CHECKOUT_IDENTIFY: [
-            #     MessageHandler(Filters.text | Filters.photo | Filters.video | Filters.all, handlers.on_identify_general, pass_user_data=True)
-            # ],
-            # enums.BOT_SELECT_PAYMENT_TYPE: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.on_order_payment_type, pass_user_data=True)
-            # ],
-            # enums.BOT_BTC_CONVERSION_FAILED: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.btc_conversion_failed, pass_user_data=True)
-            # ],
-            # enums.BOT_GENERATING_ADDRESS_FAILED: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.generating_address_failed, pass_user_data=True)
-            # ],
-            # enums.BOT_BTC_TOO_LOW: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.btc_too_low, pass_user_data=True)
-            # ],
-            # enums.BOT_ORDER_CONFIRMATION: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.on_confirm_order,
-            #                    pass_user_data=True),
-            # ],
+            enums.BOT_CHECKOUT_PHONE_NUMBER: [
+                MessageHandler(Filters.contact | Filters.text,
+                               handlers.on_order_phone_number, pass_user_data=True),
+            ],
+            enums.BOT_CHECKOUT_IDENTIFY: [
+                CallbackQueryHandler(handlers.on_order_identification, pass_user_data=True),
+                MessageHandler(Filters.text | Filters.photo | Filters.video | Filters.all, handlers.on_order_identification, pass_user_data=True)
+            ],
+            enums.BOT_CHECKOUT_PAYMENT_TYPE: [
+                CallbackQueryHandler(handlers.on_order_payment_type,
+                                     pass_user_data=True),
+            ],
+            enums.BOT_BTC_CONVERSION_FAILED: [
+                CallbackQueryHandler(handlers.on_order_btc_conversion_failed, pass_user_data=True),
+            ],
+            enums.BOT_GENERATING_ADDRESS_FAILED: [
+                CallbackQueryHandler(handlers.on_order_generating_address_failed, pass_user_data=True),
+            ],
+            enums.BOT_BTC_TOO_LOW: [
+                CallbackQueryHandler(handlers.on_order_btc_too_low, pass_user_data=True),
+            ],
+            enums.BOT_ORDER_CONFIRMATION: [
+                CallbackQueryHandler(handlers.on_order_confirm, pass_user_data=True),
+            ],
             enums.BOT_LANGUAGE_CHANGE: [
                 CallbackQueryHandler(handlers.on_bot_language_change,
                                      pass_user_data=True),
@@ -583,21 +546,18 @@ def main():
     #     Filters.status_update.new_chat_members, handlers.send_welcome_message))
     updater.dispatcher.add_handler(user_conversation_handler)
     # updater.dispatcher.add_handler(courier_conversation_handler)
-    # updater.dispatcher.add_handler(
-    #     CallbackQueryHandler(handlers.service_channel_courier_query_handler,
-    #                          pattern='^courier',
-    #                          pass_user_data=True))
-    # updater.dispatcher.add_handler(
-    #     CallbackQueryHandler(handlers.service_channel_sendto_courier_handler,
-    #                          pattern='^sendto',
-    #                          pass_user_data=True))
-    # updater.dispatcher.add_handler(
-    #     CallbackQueryHandler(handlers.on_service_send_order_to_courier,
-    #                          pattern='^order',
-    #                          pass_user_data=True))
-    # updater.dispatcher.add_handler(
-    #     CallbackQueryHandler(handlers.cancel_order_confirm, pattern='^cancel_order')
-    # )
+    updater.dispatcher.add_handler(
+        CallbackQueryHandler(handlers.service_channel_courier_query_handler,
+                             pattern='^courier',
+                             pass_user_data=True))
+    updater.dispatcher.add_handler(
+        CallbackQueryHandler(handlers.service_channel_sendto_courier_handler,
+                             pattern='^sendto',
+                             pass_user_data=True))
+    updater.dispatcher.add_handler(
+        CallbackQueryHandler(handlers.on_service_order_message, pattern='^order',pass_user_data=True)
+    )
+    updater.dispatcher.add_handler(CallbackQueryHandler(handlers.cancel_order_confirm, pattern='^cancel_order'))
     # updater.dispatcher.add_handler(
     #     CallbackQueryHandler(make_confirm,
     #                          pattern='^confirmed',
@@ -606,10 +566,9 @@ def main():
     #     CallbackQueryHandler(make_unconfirm,
     #                          pattern='^notconfirmed',
     #                          pass_user_data=True))
-    # updater.dispatcher.add_handler((
-    #     CallbackQueryHandler(handlers.delete_message,
-    #                          pattern='delete_msg')
-    # ))
+    updater.dispatcher.add_handler((
+        CallbackQueryHandler(handlers.delete_message, pattern='delete_msg')
+    ))
     # updater.dispatcher.add_handler((
     #     CallbackQueryHandler(admin_handlers.on_start_btc_processing, pattern='btc_processing_start')
     # ))

@@ -104,6 +104,10 @@ class User(BaseModel):
     def is_vip_client(self):
         return self.permission.permission == UserPermission.VIP_CLIENT
 
+    @property
+    def is_courier(self):
+        return self.permission.permission == UserPermission.COURIER
+
 
 class CourierLocation(BaseModel):
     location = ForeignKeyField(Location, related_name='couriers')
@@ -177,6 +181,7 @@ class Order(BaseModel):
     PROCESSING = 2
     DELIVERED = 3
     CANCELLED = 4
+    FINISHED = 5
     STATUSES = (
         (CONFIRMED, _('Confirmed')), (PROCESSING, _('Processing')), (DELIVERED, _('Delivered')), (CANCELLED, _('Cancelled'))
     )
@@ -195,8 +200,8 @@ class Order(BaseModel):
     coordinates = CharField(null=True)
 
     # refactor this?
-    order_hidden_text = TextField()
-    order_text = TextField()
+    order_hidden_text = TextField(default='')
+    order_text = TextField(default='')
     order_text_msg_id = TextField(null=True)
 
     def get_delivery_display(self):
@@ -242,6 +247,10 @@ class OrderBtcPayment(BaseModel):
     paid_status = IntegerField(default=BtcStatus.NOT_PAID)
     balance = DecimalField(null=True, default=0)
     payment_stage = IntegerField(default=BtcStage.FIRST)
+
+
+class BtcProc(BaseModel):
+    order_id = IntegerField()
 
 
 class OrderItem(BaseModel):
@@ -325,7 +334,7 @@ def create_tables():
             Location, UserPermission, User, Channel, ChannelPermissions, ProductCategory, Product, ProductCount,
             Order, OrderItem, ProductWarehouse, ProductMedia, IdentificationStage,
             OrderIdentificationAnswer, IdentificationQuestion, ChannelMessageData, GroupProductCount,
-            CurrencyRates, BitcoinCredentials, OrderBtcPayment, ConfigValue, UserIdentificationAnswer, CourierLocation,
+            CurrencyRates, BitcoinCredentials, OrderBtcPayment, BtcProc, ConfigValue, UserIdentificationAnswer, CourierLocation,
             WorkingHours
         ], safe=True
     )

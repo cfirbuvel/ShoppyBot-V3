@@ -1605,19 +1605,20 @@ def on_delivery_methods(bot, update, user_data):
     action = query.data
     if action in ('pickup', 'delivery', 'both'):
         # msg = None
-        if action in ('pickup', 'both'):
-            locations = Location.select().exists()
-            if not locations:
-                msg = _('Please add locations before activating pickup')
-                query.answer(msg, show_alert=True)
-                return enums.ADMIN_DELIVERY_METHODS
-        elif action in ('delivery', 'both'):
-            couriers = User.select().join(UserPermission)\
-                .where(User.banned == False, UserPermission.permission == UserPermission.COURIER).exists()
-            if not couriers:
-                msg = _('You don\'t have couriers to activate delivery')
-                query.answer(msg, show_alert=True)
-                return enums.ADMIN_DELIVERY_METHODS
+
+        # if action in ('pickup', 'both'):
+        #     locations = Location.select().exists()
+        #     if not locations:
+        #         msg = _('Please add locations before activating pickup')
+        #         query.answer(msg, show_alert=True)
+        #         return enums.ADMIN_DELIVERY_METHODS
+        # elif action in ('delivery', 'both'):
+        #     couriers = User.select().join(UserPermission)\
+        #         .where(User.banned == False, UserPermission.permission == UserPermission.COURIER).exists()
+        #     if not couriers:
+        #         msg = _('You don\'t have couriers to activate delivery')
+        #         query.answer(msg, show_alert=True)
+        #         return enums.ADMIN_DELIVERY_METHODS
         current_method = config.delivery_method
         if not current_method == action:
             config.set_value('delivery_method', action)
@@ -2978,7 +2979,14 @@ def on_admin_enter_working_hours(bot, update, user_data):
         day = user_data['day_selected']
         day = int(day)
         open_time, close_time = working_hours
-        WorkingHours.create(day=day, open_time=open_time, close_time=close_time)
+        try:
+            working_hours = WorkingHours.get(day=day)
+        except WorkingHours.DoesNotExist:
+            WorkingHours.create(day=day, open_time=open_time, close_time=close_time)
+        else:
+            working_hours.open_time = open_time
+            working_hours.close_time = close_time
+            working_hours.save()
         day_repr = dict(WorkingHours.DAYS)[day]
         open_time, close_time = open_time.strftime(time_format), close_time.strftime(time_format)
         msg = _('{} working hours was set to `{}-{}`').format(day_repr, open_time, close_time)

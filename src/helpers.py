@@ -46,7 +46,7 @@ class ConfigHelper:
                       'has_courier_option': 'true',
                       'only_for_registered': 'true', 'watch_non_registered': 'false',
                       'order_non_registered': 'false',
-                      'delivery_method': None, 'delivery_fee': '0',
+                      'delivery_method': 'both', 'delivery_fee': '0',
                       'delivery_fee_for_vip': 'false', 'discount': '0',
                       'discount_min': '0', 'btc_enabled': 'false',
                       'btc_address': '', 'currency': Currencies.DOLLAR,
@@ -118,6 +118,10 @@ class ConfigHelper:
     @property
     def order_complete_text(self):
         return self.get_config_value('order_complete_text')
+
+    @property
+    def username_gif(self):
+        return self.get_config_value('username_gif')
 
     # @property
     # def working_hours(self):
@@ -529,14 +533,16 @@ def fix_markdown(message):
 
 
 def get_service_channel():
-    return Channel.get(conf_name='service_channel')
+    return Channel.get(conf_name='service_channel').channel_id
 
 
 def get_reviews_channel():
-    return Channel.get(conf_name='reviews_channel')
+    return Channel.get(conf_name='reviews_channel').channel_id
+
 
 def get_couriers_channel():
-    return Channel.get(conf_name='couriers_channel')
+    return Channel.get(conf_name='couriers_channel').channel_id
+
 
 cat = gettext.GNUTranslations(open('he.mo', 'rb'))
 config = ConfigHelper()

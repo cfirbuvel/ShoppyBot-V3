@@ -139,7 +139,7 @@ def create_confirmation_text(user_id, order_details, total, products_info):
     user = User.get(telegram_id=user_id)
     is_vip = user.is_vip_client
     delivery_method = order_details['delivery']
-    btc_payment = order_details['btc_payment']
+    btc_payment = order_details.get('btc_payment')
     if delivery_method == 'delivery':
         loc_id = order_details.get('location_id')
         if loc_id:
@@ -216,7 +216,7 @@ def get_payment_status_msg(trans, status, balance, stage):
     return msg
 
 
-def create_service_notice(_, order, btc_data=None):
+def create_service_notice(_, order, btc_data=None, for_courier=False):
     currency = get_currency_symbol()
     text = _('Order №{} notice:').format(order.id)
     text += '\n'
@@ -284,31 +284,33 @@ def create_service_notice(_, order, btc_data=None):
         text += _('Paid: {}').format(status_msg)
         text += '\n'
 
-    username = escape_markdown(order.user.username)
-    text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
-    text += '\n'
-    text += _('Customer: @{}').format(username)
-    text += '\n'
-    text += _('Customer') + '\n' if is_vip else ''
-    text += '\n'
+    if not for_courier:
+        username = escape_markdown(user.username)
+        text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
+        text += '\n'
+        text += _('Customer: @{}').format(username)
+        text += '\n'
+        text += _('Customer status: {}').format(user.permission.get_permission_display())
+        text += '\n'
 
-    if order.is_pickup:
+    if order.shipping_method == order.PICKUP:
         text += _('🏪 Pickup')
         text += '\n'
-    if shipping_loc:
+    if order.location:
         text += _('From location: ')
-        text += escape_markdown(shipping_loc)
+        text += escape_markdown(order.location)
         text += '\n'
-    order_data_map = (
-        ('address', _('Address: ')), ('shipping_time', _('When: ')), ('time_text', _('Time: ')), ('phone_number', _('Phone number: '))
-    )
-    for name, data_text in order_data_map:
-        attr = getattr(order, name)
-        if attr:
-            text += data_text
-            text += escape_markdown(attr)
-            text += '\n'
-
+    if order.address:
+        text += _('Address: ')
+        text += escape_markdown(order.address)
+        text += '\n'
+    shipping_time_str = order.shipping_time.strftime('%b %d, %Y (%A) %H:%M')
+    text += _('When: ')
+    text += shipping_time_str
+    text += '\n'
+    if not for_courier and order.phone_number:
+        text += _('Phone number: ')
+        text += order.phone_number
     return text
 
 
