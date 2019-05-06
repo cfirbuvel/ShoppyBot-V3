@@ -1,10 +1,11 @@
 import datetime
 import os
+from gettext import gettext as _
 
 from os.path import dirname, abspath, join
 from enum import Enum
 from peewee import Model, CharField, IntegerField, SqliteDatabase, \
-    ForeignKeyField, DecimalField, BlobField, BooleanField, DateField, DateTimeField, TextField, OperationalError
+    ForeignKeyField, DecimalField, BlobField, BooleanField, TimeField, DateTimeField, TextField, OperationalError
 
 d = dirname(dirname(abspath(__file__)))
 db = SqliteDatabase(join(d, 'db.sqlite'))
@@ -18,6 +19,26 @@ class BaseModel(Model):
 class ConfigValue(BaseModel):
     name = CharField()
     value = CharField()
+
+
+class WorkingHours(BaseModel):
+    MON = 0
+    TUE = 1
+    WED = 2
+    THU = 3
+    FRI = 4
+    SAT = 5
+    SUN = 6
+    DAYS = [
+        (MON, _('Monday')), (TUE, _('Tuesday')), (WED, _('Wednesday')), (THU, _('Thurdsay')),
+        (FRI, _('Friday')), (SAT, _('Saturday')), (SUN, _('Sunday'))
+    ]
+    day = IntegerField(choices=DAYS)
+    open_time = TimeField()
+    close_time = TimeField()
+
+    def get_day_display(self):
+        return dict(self.DAYS)[self.day]
 
 
 class Location(BaseModel):
@@ -39,10 +60,10 @@ class UserPermission(BaseModel):
     PENDING_REGISTRATION = 10
 
     PERMISSIONS = (
-        (OWNER, 'Owner'), (LOGISTIC_MANAGER, 'Logistic manager'), (COURIER, 'Courier'),
-        (AUTHORIZED_RESELLER, 'Authorized reseller'), (FAMILY, 'Family'), (FRIEND, 'Friend'),
-        (VIP_CLIENT, 'Vip client'), (CLIENT, 'Client'), (NOT_REGISTERED, 'Not registered'),
-        (PENDING_REGISTRATION, 'Pending registration')
+        (OWNER, _('Owner')), (LOGISTIC_MANAGER, _('Logistic manager')), (COURIER, _('Courier')),
+        (AUTHORIZED_RESELLER, _('Authorized reseller')), (FAMILY, _('Family')), (FRIEND, _('Friend')),
+        (VIP_CLIENT, _('Vip client')), (CLIENT, _('Client')), (NOT_REGISTERED, _('Not registered')),
+        (PENDING_REGISTRATION, _('Pending registration'))
     )
     permission = IntegerField(default=NOT_REGISTERED, choices=PERMISSIONS)
 
@@ -61,6 +82,7 @@ class User(BaseModel):
     phone_number = CharField(null=True)
     permission = ForeignKeyField(UserPermission, related_name='users')
     banned = BooleanField(default=False)
+    registration_time = DateTimeField(default=datetime.datetime.now)
 
     @property
     def is_admin(self):
@@ -77,6 +99,10 @@ class User(BaseModel):
     @property
     def is_pending_registration(self):
         return self.permission.permission == UserPermission.PENDING_REGISTRATION
+
+    @property
+    def is_vip_client(self):
+        return self.permission.permission == UserPermission.VIP_CLIENT
 
 
 class CourierLocation(BaseModel):
@@ -144,7 +170,7 @@ class Order(BaseModel):
     PICKUP = 1
     DELIVERY = 2
     DELIVERY_METHODS = (
-        (PICKUP, 'Pickup'), (DELIVERY, 'Delivery')
+        (PICKUP, _('Pickup')), (DELIVERY, _('Delivery'))
     )
 
     CONFIRMED = 1
@@ -152,12 +178,12 @@ class Order(BaseModel):
     DELIVERED = 3
     CANCELLED = 4
     STATUSES = (
-        (CONFIRMED, 'Confirmed'), (PROCESSING, 'Processing'), (DELIVERED, 'Delivered'), (CANCELLED, 'Cancelled')
+        (CONFIRMED, _('Confirmed')), (PROCESSING, _('Processing')), (DELIVERED, _('Delivered')), (CANCELLED, _('Cancelled'))
     )
     user = ForeignKeyField(User, related_name='user_orders')
     courier = ForeignKeyField(User, related_name='courier_orders', null=True)
     shipping_method = IntegerField(default=PICKUP, choices=DELIVERY_METHODS)
-    shipping_time = CharField(default='')
+    shipping_time = DateTimeField()
     location = ForeignKeyField(Location, null=True)
     status = IntegerField(default=CONFIRMED, choices=STATUSES)
     client_notified = BooleanField(default=False)
@@ -193,6 +219,19 @@ class BtcStage:
     SECOND = 2
 
 
+# class RaceConditionType:
+
+
+# class RaceCondition(BaseModel):
+#     IDENTIFICATION = 1
+#     PRODUCT = 2
+#     CHOICES = (
+#         (IDENTIFICATION, 'Identification'), (PRODUCT, 'Product')
+#     )
+#     user = ForeignKeyField(User, related_name='race_condition')
+#     type = IntegerField(null=True, choices=CHOICES)
+#     timer =
+
 class OrderBtcPayment(BaseModel):
     order = ForeignKeyField(Order, related_name='btc_data')
     address = CharField(null=True)
@@ -216,6 +255,7 @@ class OrderItem(BaseModel):
 class IdentificationStage(BaseModel):
     active = BooleanField(default=True)
     vip_required = BooleanField(default=False)
+    for_order = BooleanField(default=False)
     type = CharField()
 
 
@@ -252,7 +292,7 @@ class Currencies:
     ILS = 'ILS'
 
     CURRENCIES = {
-        DOLLAR: ('Dollar', '$'), EURO: ('Euro', '€'), POUND: ('Pound', '£'), ILS: ('Shekel', '₪')
+        DOLLAR: (_('Dollar'), '$'), EURO: (_('Euro'), '€'), POUND: (_('Pound'), '£'), ILS: (_('Shekel'), '₪')
     }
 
     CHOICES = [
@@ -285,7 +325,8 @@ def create_tables():
             Location, UserPermission, User, Channel, ChannelPermissions, ProductCategory, Product, ProductCount,
             Order, OrderItem, ProductWarehouse, ProductMedia, IdentificationStage,
             OrderIdentificationAnswer, IdentificationQuestion, ChannelMessageData, GroupProductCount,
-            CurrencyRates, BitcoinCredentials, OrderBtcPayment, ConfigValue, UserIdentificationAnswer, CourierLocation
+            CurrencyRates, BitcoinCredentials, OrderBtcPayment, ConfigValue, UserIdentificationAnswer, CourierLocation,
+            WorkingHours
         ], safe=True
     )
 

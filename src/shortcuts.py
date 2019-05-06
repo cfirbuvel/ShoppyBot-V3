@@ -4,11 +4,11 @@ import operator
 from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
 
-from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission, UserIdentificationAnswer
+from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission,\
+    UserIdentificationAnswer, Product, ProductCategory, WorkingHours
 
-from .helpers import config, get_trans, logger, get_user_id, get_channel_trans
-from . import keyboards
-from . import messages
+from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, Cart, get_full_product_info
+from . import keyboards, messages, states
 
 
 # def make_confirm(bot, update, user_data):
@@ -113,8 +113,6 @@ from . import messages
 
 # def bot_send_order_msg(_, bot, chat_id, message, order_id, order_data=None, channel=False, parse_mode=ParseMode.MARKDOWN):
 #     order = Order.get(id=order_id)
-#     if not order_data:
-#         order_data = OrderPhotos.get(order=order)
 #     keyboard = keyboards.create_show_order_keyboard(_, order_id)
 #     if channel:
 #         msg_id = send_channel_msg(bot, message, chat_id, keyboard, order, parse_mode)
@@ -227,15 +225,51 @@ def send_product_info(bot, product, chat_id, trans):
                      text=msg)
 
 
-def initialize_calendar(_, bot, user_data, chat_id, message_id, state, query_id):
+def initialize_calendar(_, bot, user_data, chat_id, state, message_id=None, query_id=None, msg=None, cancel=False):
     current_date = datetime.date.today()
     year, month = current_date.year, current_date.month
-    user_data['calendar_date'] = year, month
-    user_data['calendar_state'] = state
-    msg = _('Pick year, month or day')
-    reply_markup = keyboards.calendar_keyboard(year, month, _)
-    bot.edit_message_text(msg, chat_id, message_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    bot.answer_callback_query(query_id)
+    if not msg:
+        msg = _('Pick year, month or day')
+    user_data['calendar'] = {'year': year, 'month': month, 'msg': msg, 'cancel': cancel, 'state': state}
+    reply_markup = keyboards.calendar_keyboard(year, month, _, cancel)
+    if message_id:
+        bot.edit_message_text(msg, chat_id, message_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    if query_id:
+        bot.answer_callback_query(query_id)
+    return state
+
+
+def initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query_id, msg=None, cancel=False):
+    current_time = datetime.datetime.now()
+    hour, minute = current_time.hour, current_time.minute
+    if not msg:
+        msg = _('Please select time')
+    user_data['time_picker'] = {'hour': hour, 'minute': minute, 'msg': msg, 'cancel': cancel, 'state': state}
+    reply_markup = keyboards.time_picker_keyboard(_, hour, minute, cancel)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    if query_id:
+        bot.answer_callback_query(query_id)
+    return state
+
+
+def check_order_now_allowed():
+    now = datetime.datetime.now()
+    res = True
+    try:
+        working_day = WorkingHours.get(day=now.weekday())
+    except WorkingHours.DoesNotExist:
+        res = False
+    else:
+        open_time = now.replace(hour=working_day.open_time.hour, minute=working_day.open_time.minute, second=0)
+        close_time = now.replace(hour=working_day.close_time.hour, minute=working_day.close_time.minute, second=0)
+        if not open_time <= now < close_time:
+            res = False
+    return res
 
 
 def get_order_subquery(action, val, month, year):
@@ -346,7 +380,57 @@ def send_product_media(bot, product, chat_id):
         media_class = class_map[media.file_type]
         file = media_class(media=media.file_id)
         media_list.append(file)
-    bot.send_media_group(chat_id, media_list)
+    messages = bot.send_media_group(chat_id, media_list)
+    messages_ids = [msg['message_id'] for msg in messages]
+    return messages_ids
+
+
+def send_products(_, bot, user_data, chat_id, products):
+    msgs_ids = []
+    for product in products:
+        product_id = product.id
+        product_count = Cart.get_product_count(user_data, product_id)
+        subtotal = Cart.get_product_subtotal(user_data, product_id)
+        product_title, prices = get_full_product_info(product_id)
+        media_ids = send_product_media(bot, product, chat_id)
+        msgs_ids += media_ids
+        msg = messages.create_product_description(_, product_title, prices, product_count, subtotal)
+        reply_markup = keyboards.create_product_keyboard(_, product_id, user_data)
+        msg = bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, timeout=20)
+        msgs_ids.append(msg['message_id'])
+    return msgs_ids
+
+
+def product_inactive(_, bot, user_data, update, product):
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    msg = _('Sorry, product "{}" is not active now.').format(product.title)
+    query.answer(msg)
+    Cart.remove_all(user_data, product.id)
+    products_msgs = user_data.get('products_msgs')
+    if products_msgs:
+        for p_msg_id in products_msgs:
+            bot.delete_message(chat_id, p_msg_id)
+        del user_data['products_msgs']
+    category_id = user_data.get('category_id')
+    if category_id:
+        cat = ProductCategory.get(id=category_id)
+        cat_title = escape_markdown(cat.title)
+        msg = _('Category `{}` products:').format(cat_title)
+        cat_msg = bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
+        products_msgs = [cat_msg['message_id']]
+        products = Product.select().where(Product.is_active == True, Product.category == cat)
+        if products.exists():
+            products_msgs += send_products(_, bot, user_data, chat_id, products)
+            user_data['products_msgs'] = products_msgs
+        return states.enter_menu(bot, update, user_data)
+    else:
+        products = Product.select().where(Product.is_active == True)
+        if products.exists():
+            products_msgs = send_products(_, bot, user_data, chat_id, products)
+            user_data['products_msgs'] = products_msgs
+        menu_msg_id = user_data['menu_id']
+        return states.enter_menu(bot, update, user_data, menu_msg_id)
 
 
 def send_channel_msg(bot, msg, chat_id, keyboard=None, order=None, parse_mode=ParseMode.MARKDOWN,):

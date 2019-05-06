@@ -1,9 +1,10 @@
 from collections import defaultdict
+from datetime import datetime
 
 from telegram.utils.helpers import escape_markdown
 
 from .helpers import get_trans, calculate_discount_total, config, Cart, quantize_btc, get_currency_symbol
-from .models import Location, Currencies, BtcStatus, OrderBtcPayment, BtcStage
+from .models import Location, Currencies, BtcStatus, OrderBtcPayment, BtcStage, WorkingHours, User
 from .btc_wrapper import CurrencyConverter
 
 
@@ -113,9 +114,8 @@ def create_admin_product_description(trans, product_title, product_prices):
     return text
 
 
-def create_confirmation_text(user_id, is_pickup, shipping_data, total, delivery_for_vip, product_info, btc_payment=False):
+def create_confirmation_text(user_id, order_details, total, products_info):
     _ = get_trans(user_id)
-    active_delivery = False
     text = _('Please confirm your order:')
     text += '\n\n'
     text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
@@ -123,10 +123,11 @@ def create_confirmation_text(user_id, is_pickup, shipping_data, total, delivery_
     text += _('Items in cart:')
     text += '\n'
 
+    # change currency
     currency = config.currency
     currency_symbol = Currencies.CURRENCIES[currency][1]
 
-    for title, product_count, price in product_info:
+    for title, product_count, price in products_info:
         title = escape_markdown(title)
         text += '\n'
         text += _('Product:\n{}').format(title)
@@ -135,29 +136,26 @@ def create_confirmation_text(user_id, is_pickup, shipping_data, total, delivery_
         text += '\n'
     text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
 
-    if 'vip' in shipping_data:
-        if shipping_data['vip']:
-            is_vip = True
+    user = User.get(telegram_id=user_id)
+    is_vip = user.is_vip_client
+    delivery_method = order_details['delivery']
+    btc_payment = order_details['btc_payment']
+    if delivery_method == 'delivery':
+        loc_id = order_details.get('location_id')
+        if loc_id:
+            location = Location.get(id=loc_id)
         else:
-            is_vip = False
-    else:
-        is_vip = False
-
-    shipping_loc = shipping_data.get('pickup_location')
-    try:
-        shipping_loc = Location.get(title=shipping_loc)
-    except Location.DoesNotExist:
-        shipping_loc = None
-    if shipping_loc and shipping_loc.delivery_fee is not None:
-        delivery_fee, delivery_min = shipping_loc.delivery_fee, shipping_loc.delivery_min
-    else:
-        delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
-    if total < delivery_min or delivery_min == 0:
-        if not is_vip or delivery_for_vip:
-            if not is_pickup:
-                active_delivery = True
+            location = None
+        if location and location.delivery_fee is not None:
+            delivery_fee, delivery_min = location.delivery_fee, location.delivery_min
+        else:
+            delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
+        if total < delivery_min or delivery_min == 0:
+            if not is_vip or config.delivery_fee_for_vip:
                 text += '\n'
                 text += _('Delivery Fee: {}{}').format(delivery_fee, currency_symbol)
+    else:
+        delivery_fee = 0
 
     discount = config.discount
     discount_min = config.discount_min
@@ -176,8 +174,7 @@ def create_confirmation_text(user_id, is_pickup, shipping_data, total, delivery_
                     total -= discount_num
                 text += _('Discount: {}').format(discount_str)
 
-    if active_delivery:
-        total += delivery_fee
+    total += delivery_fee
 
     text += '\n\n'
     text += _('Total: *{}{}*').format(total, currency_symbol)
@@ -219,8 +216,7 @@ def get_payment_status_msg(trans, status, balance, stage):
     return msg
 
 
-def create_service_notice(_, order, is_vip, btc_data=None):
-    active_delivery = False
+def create_service_notice(_, order, btc_data=None):
     currency = get_currency_symbol()
     text = _('Order №{} notice:').format(order.id)
     text += '\n'
@@ -239,22 +235,20 @@ def create_service_notice(_, order, is_vip, btc_data=None):
         text += _('x {} = {}{}').format(order_item.count, order_item.total_price, currency)
         text += '\n'
         total += order_item.total_price
-
-    shipping_loc = order.location
-    if shipping_loc:
-        shipping_loc = shipping_loc.title
-    if shipping_loc and shipping_loc.delivery_fee is not None:
-        delivery_fee, delivery_min = shipping_loc.delivery_fee, shipping_loc.delivery_min
-    else:
-        delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
-
-    delivery_for_vip = config.delivery_fee_for_vip
-    if total < delivery_min or delivery_min == 0:
-        if not is_vip or delivery_for_vip:
-            if not order.is_pickup:
-                active_delivery = True
+    user = order.user
+    is_vip = user.is_vip_client
+    if order.shipping_method == order.DELIVERY:
+        shipping_loc = order.location
+        if shipping_loc and shipping_loc.delivery_fee is not None:
+            delivery_fee, delivery_min = shipping_loc.delivery_fee, shipping_loc.delivery_min
+        else:
+            delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
+        if total < delivery_min or delivery_min == 0:
+            if not is_vip or config.delivery_fee_for_vip:
                 text += '\n'
                 text += _('Delivery Fee: {}{}').format(delivery_fee, currency)
+    else:
+        delivery_fee = 0
 
     discount = config.discount
     discount_min = config.discount_min
@@ -273,8 +267,7 @@ def create_service_notice(_, order, is_vip, btc_data=None):
                     total -= discount_num
                 text += _('Discount: {}').format(discount_str)
 
-    if active_delivery:
-        total += delivery_fee
+    total += delivery_fee
 
     text += '\n'
     text += _('Total: {}{}').format(total, currency)
@@ -296,7 +289,7 @@ def create_service_notice(_, order, is_vip, btc_data=None):
     text += '\n'
     text += _('Customer: @{}').format(username)
     text += '\n'
-    text += _('Vip Customer') + '\n' if is_vip else ''
+    text += _('Customer') + '\n' if is_vip else ''
     text += '\n'
 
     if order.is_pickup:
@@ -373,3 +366,13 @@ def create_delivery_fee_msg(_, location=None):
             'Only works on delivery\n\n'
             'Current fee{}: {}>{}').format(location_string, delivery_fee, delivery_min)
     return res
+
+
+def get_working_hours_msg(_):
+    msg = _('*Working hours:*')
+    time_format = '%H:%M'
+    for hours in WorkingHours.select():
+        open_time, close_time = hours.open_time.strftime(time_format), hours.close_time.strftime(time_format)
+        msg += '\n'
+        msg += '{}: `{}-{}`'.format(_(hours.get_day_display()), open_time, close_time)
+    return msg

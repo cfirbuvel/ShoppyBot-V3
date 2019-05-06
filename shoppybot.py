@@ -99,12 +99,26 @@ def main():
             enums.BOT_CHANNELS: [
                 CallbackQueryHandler(handlers.on_channels, pass_user_data=True)
             ],
-            # enums.BOT_CHECKOUT_SHIPPING: [
-            #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
-            #                          pass_user_data=True),
-            #     MessageHandler(Filters.text, handlers.on_shipping_method,
-            #                    pass_user_data=True),
-            # ],
+            enums.BOT_CHECKOUT_SHIPPING: [
+                CallbackQueryHandler(handlers.on_order_delivery, pass_user_data=True),
+            ],
+            enums.BOT_CHECKOUT_LOCATION: [
+                CallbackQueryHandler(handlers.on_order_locations, pass_user_data=True),
+            ],
+            enums.BOT_CHECKOUT_ADDRESS: [
+                MessageHandler(Filters.text, handlers.on_order_delivery_address, pass_user_data=True)
+            ],
+            enums.BOT_CHECKOUT_DATETIME_SELECT: [
+                CallbackQueryHandler(handlers.on_order_datetime_select, pass_user_data=True)
+            ],
+            enums.BOT_CHECKOUT_DATE_SELECT: [
+                CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
+                CallbackQueryHandler(handlers.on_order_date_select, pass_user_data=True)
+            ],
+            enums.BOT_CHECKOUT_TIME_SELECT: [
+                CallbackQueryHandler(handlers.on_time_picker_change, pattern='^time_picker', pass_user_data=True),
+                CallbackQueryHandler(handlers.on_order_time_select, pass_user_data=True)
+            ],
             # enums.BOT_CHECKOUT_LOCATION_PICKUP: [
             #     CallbackQueryHandler(handlers.checkout_fallback_command_handler,
             #                          pass_user_data=True),
@@ -187,9 +201,9 @@ def main():
             enums.BOT_MY_ORDERS_SELECT:[
                 CallbackQueryHandler(handlers.on_my_order_select, pass_user_data=True)
             ],
-            # enums.BOT_PRODUCT_CATEGORIES: [
-            #     CallbackQueryHandler(handlers.on_product_categories, pass_user_data=True)
-            # ],
+            enums.BOT_PRODUCT_CATEGORIES: [
+                CallbackQueryHandler(handlers.on_product_categories, pass_user_data=True)
+            ],
             #
             # admin states
             #
@@ -244,6 +258,13 @@ def main():
             enums.ADMIN_COURIER_WAREHOUSE_EDIT: [
                 CallbackQueryHandler(admin_handlers.on_courier_warehouse_edit, pass_user_data=True),
                 MessageHandler(Filters.text, admin_handlers.on_courier_warehouse_edit, pass_user_data=True)
+            ],
+            enums.ADMIN_EDIT_WORKING_HOURS: [
+                CallbackQueryHandler(admin_handlers.on_admin_edit_working_hours, pass_user_data=True)
+            ],
+            enums.ADMIN_ENTER_WORKING_HOURS: [
+                CallbackQueryHandler(admin_handlers.on_admin_enter_working_hours, pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_admin_enter_working_hours, pass_user_data=True)
             ],
             enums.ADMIN_EDIT_MESSAGES: [
                 CallbackQueryHandler(admin_handlers.on_edit_messages, pass_user_data=True)
@@ -488,6 +509,12 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_admin_edit_identification_question, pass_user_data=True),
                 MessageHandler(Filters.text, admin_handlers.on_admin_edit_identification_question, pass_user_data=True)
             ],
+            enums.ADMIN_DELIVERY: [
+                CallbackQueryHandler(admin_handlers.on_delivery, pass_user_data=True)
+            ],
+            enums.ADMIN_DELIVERY_METHODS: [
+                CallbackQueryHandler(admin_handlers.on_delivery_methods, pass_user_data=True)
+            ],
             enums.ADMIN_DELIVERY_FEE: [
                 CallbackQueryHandler(admin_handlers.on_delivery_fee, pass_user_data=True)
             ],
@@ -507,11 +534,11 @@ def main():
                 MessageHandler(Filters.all, admin_handlers.on_admin_fallback),
             ],
             enums.ADMIN_RESET_DATA: [
-                CallbackQueryHandler(admin_handlers.on_admin_reset_all_data)
+                CallbackQueryHandler(admin_handlers.on_admin_reset_all_data, pass_user_data=True)
             ],
-            # enums.ADMIN_RESET_CONFIRM: [
-            #     CallbackQueryHandler(admin_handlers.on_admin_reset_confirm)
-            # ],
+            enums.ADMIN_RESET_CONFIRM: [
+                CallbackQueryHandler(admin_handlers.on_admin_reset_confirm, pass_user_data=True)
+            ],
             enums.ADMIN_PRODUCT_PRICE_GROUPS: [
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_groups, pass_user_data=True)
             ],

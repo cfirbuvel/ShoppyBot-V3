@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import threading
 
@@ -18,7 +19,7 @@ from .helpers import get_user_id, config, get_trans, parse_discount, get_channel
 from .models import Product, ProductCount, Location, ProductWarehouse, User, \
     ProductMedia, ProductCategory, IdentificationStage, Order, IdentificationQuestion, \
     ChannelMessageData, GroupProductCount, delete_db, create_tables, Currencies, BitcoinCredentials, \
-    Channel, UserPermission, ChannelPermissions, CourierLocation
+    Channel, UserPermission, ChannelPermissions, CourierLocation, WorkingHours
 
 
 def on_cmd_add_product(bot, update):
@@ -358,6 +359,8 @@ def on_bot_settings_menu(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_COURIERS
+    elif data == 'bot_settings_edit_working_hours':
+        return states.enter_working_days(_, bot, chat_id, msg_id, query.id)
     elif data == 'bot_settings_edit_messages':
         msg = _('⌨️ Edit bot messages')
         reply_markup = keyboards.edit_messages_keyboard(_)
@@ -394,7 +397,7 @@ def on_bot_settings_menu(bot, update, user_data):
         wallet_id = btc_creds.wallet_id
         msg = _('💰 Bitcoin payments')
         msg += '\n'
-        msg += _('Status: *{}*').format('Enabled' if btc_creds.enabled else 'Disabled')
+        msg += _('Status: *{}*').format(_('Enabled') if btc_creds.enabled else _('Disabled'))
         msg += '\n'
         msg += _('Wallet ID: *{}*').format(wallet_id if wallet_id else '')
         msg += '\n'
@@ -418,7 +421,7 @@ def on_bot_settings_menu(bot, update, user_data):
             query.answer()
             return enums.ADMIN_RESET_DATA
         else:
-            query.answer('This function works only for admin')
+            query.answer(_('This function works only for admin'))
             return enums.ADMIN_BOT_SETTINGS
     return states.enter_unknown_command(_, bot, query)
 
@@ -489,7 +492,7 @@ def on_courier_detail(bot, update, user_data):
             all_locs.append((loc.title, loc.id, is_picked))
         user_data['courier_locations_select'] = {'page': 1, 'ids': courier_locs}
         reply_markup = keyboards.general_select_keyboard(_, all_locs)
-        msg = '🎯 Change locations'
+        msg = _('🎯 Change locations')
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_COURIER_LOCATIONS
@@ -532,7 +535,7 @@ def on_courier_locations(bot, update, user_data):
         for loc in Location.select():
             is_picked = True if loc.id in locs_selected else False
             all_locs.append((loc.title, loc.id, is_picked))
-        msg = '🎯 Change locations'
+        msg = _('🎯 Change locations')
         reply_markup = keyboards.general_select_keyboard(_, all_locs, page_num=page)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
@@ -672,11 +675,11 @@ def on_edit_messages(bot, update, user_data):
     _ = get_trans(user_id)
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action != 'back':
-        if action == 'working_hours':
-            config_msg = config.working_hours
-            msg_remainder = _('Type new working hours message')
-            user_data['edit_message'] = {'name': 'working_hours', 'msg': _('Working hours were changed.')}
-        elif action == 'contact_info':
+        # if action == 'working_hours':
+        #     config_msg = config.working_hours
+        #     msg_remainder = _('Type new working hours message')
+        #     user_data['edit_message'] = {'name': 'working_hours', 'msg': _('Working hours were changed.')}
+        if action == 'contact_info':
             config_msg = config.contact_info
             msg_remainder = _('Type new contact info')
             user_data['edit_message'] = {'name': 'contact_info', 'msg': _('Contact info were changed.')}
@@ -740,7 +743,7 @@ def on_registered_users(bot, update, user_data):
         username = escape_markdown(user.username)
         msg = '*{}*'.format(username)
         msg += '\n'
-        msg += '*Status*: {}'.format(user.permission.get_permission_display())
+        msg += _('*Status*: {}').format(user.permission.get_permission_display())
         user_data['user_select'] = val
         return states.enter_registered_users_select(_, bot, chat_id, msg, query.id, msg_id)
     elif action == 'back':
@@ -768,7 +771,7 @@ def on_registered_users_select(bot, update, user_data):
         bot.delete_message(chat_id, msg_id)
         answers_ids = shortcuts.send_user_identification_answers(bot, chat_id, user)
         user_data['user_id_messages'] = answers_ids
-        msg = '*Phone number*: {}'.format(user.phone_number)
+        msg = _('*Phone number*: {}').format(user.phone_number)
         return states.enter_registered_users_select(_, bot, chat_id, msg, query.id)
     elif action == 'remove_registration':
         username = escape_markdown(user.username)
@@ -824,7 +827,7 @@ def on_registered_users_remove(bot, update, user_data):
         else:
             msg = '*{}*'.format(username)
             msg += '\n'
-            msg += '*Status*: {}'.format(user.permission.get_permission_display())
+            msg += _('*Status*: {}').format(user.permission.get_permission_display())
             return states.enter_registered_users_select(_, bot, chat_id, msg, query.id, msg_id)
     return states.enter_unknown_command(_, bot, query)
 
@@ -852,7 +855,7 @@ def on_registered_users_status(bot, update, user_data):
         else:
             msg = '*{}*'.format(username)
             msg += '\n'
-            msg += '*Status*: {}'.format(user.permission.get_permission_display())
+            msg += _('*Status*: {}').format(user.permission.get_permission_display())
         return states.enter_registered_users_select(_, bot, chat_id, msg, query.id, msg_id)
     return states.enter_unknown_command(_, bot, query)
 
@@ -879,7 +882,7 @@ def on_registered_users_black_list(bot, update, user_data):
         else:
             msg = '*{}*'.format(username)
             msg += '\n'
-            msg += '*Status*: {}'.format(user.permission.get_permission_display())
+            msg += _('*Status*: {}').format(user.permission.get_permission_display())
             return states.enter_registered_users_select(_, bot, chat_id, msg, query.id, msg_id)
     return states.enter_unknown_command(_, bot, query)
 
@@ -1043,7 +1046,7 @@ def on_black_list_user(bot, update, user_data):
         bot.delete_message(chat_id, msg_id)
         answers_ids = shortcuts.send_user_identification_answers(bot, chat_id, user)
         user_data['user_id_messages'] = answers_ids
-        msg = '*Phone number*: {}'.format(user.phone_number)
+        msg = _('*Phone number*: {}').format(user.phone_number)
         reply_markup = keyboards.banned_user_keyboard(_)
         bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
@@ -1386,7 +1389,7 @@ def on_admin_order_options(bot, update, user_data):
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id)
     if data == 'bot_order_options_orders':
         msg = _('📖 Orders')
-        reply_markup = keyboards.create_bot_orders_keyboard(_)
+        reply_markup = keyboards.bot_orders_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_ORDERS
@@ -1425,12 +1428,8 @@ def on_admin_order_options(bot, update, user_data):
         )
         query.answer()
         return enums.ADMIN_ADD_DISCOUNT
-    elif data == 'bot_order_options_delivery_fee':
-        msg = _('🚕 Delivery fee')
-        reply_markup = keyboards.delivery_fee_keyboard(_, config.delivery_fee_for_vip)
-        bot.edit_message_text(msg, chat_id, msg, reply_markup=reply_markup)
-        query.answer()
-        return enums.ADMIN_DELIVERY_FEE
+    elif data == 'bot_order_options_delivery':
+        return states.enter_delivery_options(_, bot, chat_id, msg_id, query.id)
     elif data == 'bot_order_options_price_groups':
         msg = _('💸 Product price groups')
         bot.edit_message_text(msg, chat_id, msg, parse_mode=ParseMode.MARKDOWN,
@@ -1444,9 +1443,9 @@ def on_admin_order_options(bot, update, user_data):
         for stage in IdentificationStage:
             first_question = stage.identification_questions[0]
             first_question = first_question.content
-            questions.append((stage.id, stage.active, stage.vip_required, first_question))
+            questions.append((stage.id, stage.active, stage.vip_required, stage.for_order, first_question))
         msg = _('👨 Edit identification process')
-        reply_markup = keyboards.create_edit_identification_keyboard(_, questions)
+        reply_markup = keyboards.edit_identification_keyboard(_, questions)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_EDIT_IDENTIFICATION_STAGES
@@ -1476,7 +1475,7 @@ def on_admin_orders(bot, update, user_data):
         return enums.ADMIN_ORDERS_PENDING_SELECT
     elif action == 'finished':
         state = enums.ADMIN_ORDERS_FINISHED_DATE
-        shortcuts.initialize_calendar(bot, user_data, chat_id, msg_id, state, _, query.id)
+        shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
         return state
     return states.enter_unknown_command(_, bot, query)
 
@@ -1490,7 +1489,7 @@ def on_admin_orders_pending_select(bot, update, user_data):
     message_id = query.message.message_id
     action, val = query.data.split('|')
     if action == 'back':
-        bot.edit_message_text(_('📖 Orders'), chat_id, message_id, reply_markup=keyboards.create_bot_orders_keyboard(_),
+        bot.edit_message_text(_('📖 Orders'), chat_id, message_id, reply_markup=keyboards.bot_orders_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_ORDERS
@@ -1531,7 +1530,7 @@ def on_admin_orders_finished_date(bot, update, user_data):
         return enums.ADMIN_ORDERS_FINISHED_DATE
     elif action == 'back':
         bot.edit_message_text(_('📖 Orders'), chat_id, message_id,
-                              reply_markup=keyboards.create_bot_orders_keyboard(_),
+                              reply_markup=keyboards.bot_orders_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_ORDERS
@@ -1578,8 +1577,62 @@ def on_admin_orders_finished_date(bot, update, user_data):
 #     query.answer()
 #     return enums.ADMIN_ORDERS_FINISHED_SELECT
 
+def on_delivery(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    if action == 'edit_methods':
+        msg = _('🏃‍♂️ Edit delivery methods')
+        reply_markup = keyboards.delivery_methods_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_DELIVERY_METHODS
+    elif action == 'edit_fee':
+        return states.enter_delivery_fee(_, bot, chat_id, msg_id, query.id)
+    elif action == 'back':
+        return states.enter_menu(bot, update, user_data, msg_id, query.id)
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
-def on_delivery_fee(bot, update):
+
+def on_delivery_methods(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    if action in ('pickup', 'delivery', 'both'):
+        # msg = None
+        if action in ('pickup', 'both'):
+            locations = Location.select().exists()
+            if not locations:
+                msg = _('Please add locations before activating pickup')
+                query.answer(msg, show_alert=True)
+                return enums.ADMIN_DELIVERY_METHODS
+        elif action in ('delivery', 'both'):
+            couriers = User.select().join(UserPermission)\
+                .where(User.banned == False, UserPermission.permission == UserPermission.COURIER).exists()
+            if not couriers:
+                msg = _('You don\'t have couriers to activate delivery')
+                query.answer(msg, show_alert=True)
+                return enums.ADMIN_DELIVERY_METHODS
+        current_method = config.delivery_method
+        if not current_method == action:
+            config.set_value('delivery_method', action)
+            msg = _('🏃‍♂️ Edit delivery methods')
+            reply_markup = keyboards.delivery_methods_keyboard(_)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_DELIVERY_METHODS
+    elif action == 'back':
+        return states.enter_delivery_options(_, bot, chat_id, msg_id, query.id)
+    else:
+        return states.enter_unknown_command(_, bot, query)
+
+
+def on_delivery_fee(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -2048,6 +2101,7 @@ def on_warehouse_courier_edit(bot, update, user_data):
     return states.enter_warehouse_courier_detail(_, bot, chat_id, warehouse)
 
 
+@user_passes
 def on_products(bot, update, user_data):
     query = update.callback_query
     data = query.data
@@ -2102,8 +2156,11 @@ def on_products(bot, update, user_data):
                               reply_markup=products_keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_DELETE_PRODUCT
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_show_product(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -2142,6 +2199,7 @@ def on_show_product(bot, update, user_data):
     return enums.ADMIN_PRODUCTS_SHOW
 
 
+@user_passes
 def on_product_edit_select(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -2165,30 +2223,38 @@ def on_product_edit_select(bot, update, user_data):
         return enums.ADMIN_PRODUCT_EDIT_SELECT
     elif action == 'select':
         product = Product.get(id=param)
+        product.is_active = False
+        product.save()
         user_data['admin_product_edit_id'] = product.id
         product_title = escape_markdown(product.title)
         msg = _('Edit product {}').format(product_title)
+        msg += '\n'
+        msg += _('_Note: product is disabled while editing_')
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_bot_product_edit_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_EDIT
 
 
+@user_passes
 def on_product_edit(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action = query.data
+    product_id = user_data['admin_product_edit_id']
+    product = Product.get(id=product_id)
     if action == 'back':
+        product.is_active = True
+        product.save()
+        del user_data['admin_product_edit_id']
         products = Product.select(Product.title, Product.id).where(Product.is_active == True).tuples()
         msg = _('Select a product to edit')
         bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
                               reply_markup=keyboards.general_select_one_keyboard(_, products))
         query.answer()
         return enums.ADMIN_PRODUCT_EDIT_SELECT
-    product_id = user_data['admin_product_edit_id']
-    product = Product.get(id=product_id)
     if action == 'title':
         product_title = escape_markdown(product.title)
         msg = _('Current title: {}\n\nEnter new title for product').format(product_title)
@@ -2207,36 +2273,46 @@ def on_product_edit(bot, update, user_data):
         msg = _('Upload new photos for product')
         bot.send_message(chat_id, msg, reply_markup=keyboards.create_product_edit_media_keyboard(_), parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_PRODUCT_EDIT_MEDIA
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_product_edit_title(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
     product_id = user_data['admin_product_edit_id']
     product = Product.get(id=product_id)
-    if update.callback_query and update.callback_query.data == 'back':
-        upd_msg = update.callback_query.message
-        product_title = escape_markdown(product.title)
-        msg = _('Edit product {}').format(product_title)
-        bot.edit_message_text(msg, upd_msg.chat_id, upd_msg.message_id, reply_markup=keyboards.create_bot_product_edit_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
-        update.callback_query.answer()
+    query = update.callback_query
+    if query:
+        if query.data == 'back':
+            product_title = escape_markdown(product.title)
+            msg = _('Edit product {}').format(product_title)
+            bot.edit_message_text(msg, chat_id, query.message.message_id,
+                                  reply_markup=keyboards.create_bot_product_edit_keyboard(_),
+                                  parse_mode=ParseMode.MARKDOWN)
+            query.answer()
+            return enums.ADMIN_PRODUCT_EDIT
+        else:
+            return states.enter_unknown_command(_, bot, query)
     else:
-        upd_msg = update.message
-        product.title = upd_msg.text
+        product.title = update.message.text
         product.save()
         msg = _('Product\'s title has been updated')
-        bot.send_message(upd_msg.chat_id, msg, reply_markup=keyboards.create_bot_product_edit_keyboard(_),
+        bot.send_message(chat_id, msg, reply_markup=keyboards.create_bot_product_edit_keyboard(_),
                          parse_mode=ParseMode.MARKDOWN)
-    return enums.ADMIN_PRODUCT_EDIT
+        return enums.ADMIN_PRODUCT_EDIT
 
 
+@user_passes
 def on_product_edit_price_type(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     query = update.callback_query
     chat_id, msg_id = query.message.chat_id, query.message.message_id
-    if query.data == 'text':
+    action = query.data
+    if action == 'text':
         product_id = user_data['admin_product_edit_id']
         product = Product.get(id=product_id)
         prices_str = shortcuts.get_product_prices_str(_, product)
@@ -2244,14 +2320,14 @@ def on_product_edit_price_type(bot, update, user_data):
         msg = _('Enter new product prices\none per line in the format\n*COUNT PRICE*, e.g. *1 10*')
         bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_PRODUCT_EDIT_PRICES_TEXT
-    elif query.data == 'select':
+    elif action == 'select':
         msg = _('Select product price group to use with this product:')
         groups = GroupProductCount.select(GroupProductCount.name, GroupProductCount.id).tuples()
         keyboard = keyboards.general_select_one_keyboard(_, groups)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_EDIT_PRICES_GROUP
-    else:
+    elif action == 'back':
         product_id = user_data['admin_product_edit_id']
         product = Product.get(id=product_id)
         product_title = escape_markdown(product.title)
@@ -2260,8 +2336,11 @@ def on_product_edit_price_type(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_EDIT
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_product_edit_prices_group(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -2289,7 +2368,7 @@ def on_product_edit_prices_group(bot, update, user_data):
         keyboard = keyboards.create_bot_product_edit_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_PRODUCT_EDIT
-    else:
+    elif action == 'back':
         product_id = user_data['admin_product_edit_id']
         product = Product.get(id=product_id)
         prices_str = shortcuts.get_product_prices_str(_, product)
@@ -2297,6 +2376,8 @@ def on_product_edit_prices_group(bot, update, user_data):
         bot.edit_message_text(prices_str, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_EDIT_PRICES
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
 def on_product_edit_prices_text(bot, update, user_data):
@@ -2304,18 +2385,23 @@ def on_product_edit_prices_text(bot, update, user_data):
     _ = get_trans(user_id)
     product_id = user_data['admin_product_edit_id']
     product = Product.get(id=product_id)
-    if update.callback_query and update.callback_query.data == 'back':
-        upd_msg = update.callback_query.message
-        product_title = escape_markdown(product.title)
-        msg = _('Edit product {}').format(product_title)
-        bot.edit_message_text(msg, upd_msg.chat_id, upd_msg.message_id,
-                              reply_markup=keyboards.create_bot_product_edit_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
+    chat_id = update.effective_chat.id
+    query = update.callback_query
+    if query:
+        if query.data == 'back':
+            product_title = escape_markdown(product.title)
+            msg = _('Edit product {}').format(product_title)
+            bot.edit_message_text(msg, chat_id, query.message.message_id,
+                                  reply_markup=keyboards.create_bot_product_edit_keyboard(_),
+                                  parse_mode=ParseMode.MARKDOWN)
+            return enums.ADMIN_PRODUCT_EDIT
+        else:
+            return states.enter_unknown_command(_, bot, query)
     else:
-        upd_msg = update.message
+        prices_text = update.message.text
         prices_list = []
         try:
-            for line in upd_msg.text.split('\n'):
+            for line in prices_text.split('\n'):
                 count_str, price_str = line.split()
                 count = int(count_str)
                 price = float(price_str)
@@ -2330,17 +2416,18 @@ def on_product_edit_prices_text(bot, update, user_data):
             for count, price in prices_list:
                 ProductCount.create(product=product, count=count, price=price)
             msg = _('Product\'s prices have been updated')
-        bot.send_message(upd_msg.chat_id, msg, reply_markup=keyboards.create_bot_product_edit_keyboard(_),
+        bot.send_message(chat_id, msg, reply_markup=keyboards.create_bot_product_edit_keyboard(_),
                          parse_mode=ParseMode.MARKDOWN)
-    return enums.ADMIN_PRODUCT_EDIT
+        return enums.ADMIN_PRODUCT_EDIT
 
 
+@user_passes
 def on_product_edit_media(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     upd_msg = update.message
     msg_text = upd_msg.text
-    chat_id = update.message.chat_id
+    chat_id = update.effective_chat.id
     product_id = user_data['admin_product_edit_id']
     product = Product.get(id=product_id)
     product_title = escape_markdown(product.title)
@@ -2382,14 +2469,14 @@ def on_product_edit_media(bot, update, user_data):
     return enums.ADMIN_PRODUCT_EDIT_MEDIA
 
 
+@user_passes
 def on_delete_product(bot, update, user_data):
     query = update.callback_query
     data = query.data
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     action, param = data.split('|')
-    chat_id = query.message.chat_id
-    message_id = query.message.message_id
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
     selected_ids = user_data['products_remove']['ids']
     if action == 'done':
         if selected_ids:
@@ -2401,59 +2488,57 @@ def on_delete_product(bot, update, user_data):
             query.answer(text=msg)
         del user_data['products_remove']
         bot.edit_message_text(chat_id=chat_id,
-                              message_id=message_id,
+                              message_id=msg_id,
                               text=_('🏪 My Products'),
                               reply_markup=keyboards.create_bot_products_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCTS
-    products = []
-    current_page = user_data['products_remove']['page']
-    if action == 'page':
-        current_page = int(param)
-        user_data['products_remove']['page'] = current_page
-    elif action == 'select':
-        if param in selected_ids:
-            selected_ids.remove(param)
-        else:
-            selected_ids.append(param)
-    for product in Product.filter(is_active=True):
-        if str(product.id) in selected_ids:
-            selected = True
-        else:
-            selected = False
-        products.append((product.title, product.id, selected))
-    products_keyboard = keyboards.general_select_keyboard(_, products, current_page)
-    bot.edit_message_text(chat_id=chat_id, message_id=message_id,
-                          text=_('Select a product which you want to remove'),
-                          reply_markup=products_keyboard, parse_mode=ParseMode.MARKDOWN)
-    query.answer()
-    return enums.ADMIN_DELETE_PRODUCT
+    elif action in ('page', 'select'):
+        products = []
+        current_page = user_data['products_remove']['page']
+        if action == 'page':
+            current_page = int(param)
+            user_data['products_remove']['page'] = current_page
+        elif action == 'select':
+            if param in selected_ids:
+                selected_ids.remove(param)
+            else:
+                selected_ids.append(param)
+        for product in Product.filter(is_active=True):
+            if str(product.id) in selected_ids:
+                selected = True
+            else:
+                selected = False
+            products.append((product.title, product.id, selected))
+        products_keyboard = keyboards.general_select_keyboard(_, products, current_page)
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
+                              text=_('Select a product which you want to remove'),
+                              reply_markup=products_keyboard, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_DELETE_PRODUCT
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_product_add(bot, update, user_data):
     query = update.callback_query
     data = query.data
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id = query.message.chat_id
-    message_id = query.message.message_id
+    msg_id = query.message.message_id
     if data == 'bot_product_back':
-        bot.edit_message_text(chat_id=query.message.chat_id,
-                              message_id=query.message.message_id,
-                              text=_('🏪 My Products'),
-                              reply_markup=keyboards.create_bot_products_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
+        msg = _('🏪 My Products')
+        reply_markup = keyboards.create_bot_products_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_PRODUCTS
     elif data == 'bot_product_new':
-        bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=_('Enter new product title'),
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=keyboards.cancel_button(_),
-            )
+        msg = _('Enter new product title')
+        reply_markup = keyboards.cancel_button(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_PRODUCT_TITLE
     elif data == 'bot_product_last':
@@ -2465,13 +2550,16 @@ def on_product_add(bot, update, user_data):
         inactive_products = [(product.title, product.id, False) for product in inactive_products]
         user_data['last_products_add'] = {'ids': [], 'page': 1}
         products_keyboard = keyboards.general_select_keyboard(_, inactive_products)
-        bot.edit_message_text(chat_id=chat_id, message_id=message_id,
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
                               text=_('Select a product which you want to activate again'),
                               reply_markup=products_keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_LAST_ADD
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_product_last_select(bot, update, user_data):
     query = update.callback_query
     data = query.data
@@ -2479,7 +2567,7 @@ def on_product_last_select(bot, update, user_data):
     _ = get_trans(user_id)
     action, param = data.split('|')
     chat_id = query.message.chat_id
-    message_id = query.message.message_id
+    msg_id = query.message.message_id
     selected_ids = user_data['last_products_add']['ids']
     if action == 'done':
         if selected_ids:
@@ -2490,56 +2578,67 @@ def on_product_last_select(bot, update, user_data):
             msg = _('Products have been added')
             query.answer(text=msg)
         del user_data['last_products_add']
-        bot.edit_message_text(_('➕ Add product'), chat_id, message_id,
+        bot.edit_message_text(_('➕ Add product'), chat_id, msg_id,
                               reply_markup=keyboards.create_bot_product_add_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_ADD
-    inactive_products = []
-    current_page = user_data['last_products_add']['page']
-    if action == 'page':
-        current_page = int(param)
-        user_data['last_products_add']['page'] = current_page
-    elif action == 'select':
-        if param in selected_ids:
-            selected_ids.remove(param)
-        else:
-            selected_ids.append(param)
-    for product in Product.filter(is_active=False):
-        if str(product.id) in selected_ids:
-            selected = True
-        else:
-            selected = False
-        inactive_products.append((product.title, product.id, selected))
-    products_keyboard = keyboards.general_select_keyboard(_, inactive_products, current_page)
-    bot.edit_message_text(chat_id=chat_id, message_id=message_id,
-                          text=_('Select a product which you want to activate again'),
-                          reply_markup=products_keyboard, parse_mode=ParseMode.MARKDOWN)
-    query.answer()
-    return enums.ADMIN_PRODUCT_LAST_ADD
+    elif action in ('page', 'select'):
+        inactive_products = []
+        current_page = user_data['last_products_add']['page']
+        if action == 'page':
+            current_page = int(param)
+            user_data['last_products_add']['page'] = current_page
+        elif action == 'select':
+            if param in selected_ids:
+                selected_ids.remove(param)
+            else:
+                selected_ids.append(param)
+        for product in Product.filter(is_active=False):
+            if str(product.id) in selected_ids:
+                selected = True
+            else:
+                selected = False
+            inactive_products.append((product.title, product.id, selected))
+        products_keyboard = keyboards.general_select_keyboard(_, inactive_products, current_page)
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
+                              text=_('Select a product which you want to activate again'),
+                              reply_markup=products_keyboard, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_PRODUCT_LAST_ADD
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_product_title(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
-    if update.callback_query and update.callback_query.data == 'back':
-        query = update.callback_query
-        bot.edit_message_text(chat_id=query.message.chat_id,
-                              message_id=query.message.message_id,
-                              text=_('➕ Add product'),
-                              reply_markup=keyboards.create_bot_product_add_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
-        return enums.ADMIN_PRODUCT_ADD
+    chat_id = update.effective_chat.id
+    query = update.callback_query
+    if query:
+        if query.data == 'back':
+            query = update.callback_query
+            bot.edit_message_text(chat_id=chat_id,
+                                  message_id=query.message.message_id,
+                                  text=_('➕ Add product'),
+                                  reply_markup=keyboards.create_bot_product_add_keyboard(_),
+                                  parse_mode=ParseMode.MARKDOWN)
+            query.answer()
+            return enums.ADMIN_PRODUCT_ADD
+        else:
+            return states.enter_unknown_command(_, bot, query)
     title = update.message.text
     # initialize new product data
     user_data['add_product'] = {}
     user_data['add_product']['title'] = title
     msg = _('Add product prices:')
     keyboard = keyboards.create_product_price_type_keyboard(_)
-    bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     return enums.ADMIN_ADD_PRODUCT_PRICES
 
 
+@user_passes
 def on_add_product_prices(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -2559,13 +2658,16 @@ def on_add_product_prices(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_PRICES_GROUP
-    else:
+    elif action == 'back':
         msg = _('➕ Add product')
         keyboard = keyboards.create_bot_product_add_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_PRODUCT_ADD
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_product_price_group(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -2586,24 +2688,31 @@ def on_product_price_group(bot, update, user_data):
         bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_MEDIA
-    else:
+    elif action == 'back':
         msg = _('Add product prices:')
         keyboard = keyboards.create_product_price_type_keyboard(_)
         bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_ADD_PRODUCT_PRICES
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_product_price_text(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
-    if update.callback_query and update.callback_query.data == 'back':
-        query = update.callback_query
-        msg = _('Add product prices:')
-        keyboard = keyboards.create_product_price_type_keyboard(_)
-        bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-        query.answer()
-        return enums.ADMIN_ADD_PRODUCT_PRICES
+    chat_id = update.effective_chat.id
+    query = update.callback_query
+    if query:
+        if query.data == 'back':
+            msg = _('Add product prices:')
+            keyboard = keyboards.create_product_price_type_keyboard(_)
+            bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+            query.answer()
+            return enums.ADMIN_ADD_PRODUCT_PRICES
+        else:
+            return states.enter_unknown_command(_, bot, query)
     # check that prices are valid
     prices = update.message.text
     prices_list = []
@@ -2621,10 +2730,11 @@ def on_product_price_text(bot, update, user_data):
     user_data['add_product']['prices'] = {'list': prices_list}
     msg = _('Send photos/videos for new product')
     keyboard = keyboards.create_product_media_keyboard(_)
-    bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+    bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     return enums.ADMIN_PRODUCT_MEDIA
 
 
+@user_passes
 def on_product_media(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -2794,34 +2904,89 @@ def on_location_add(bot, update, user_data):
 
 # additional cancel handler for admin commands
 def on_cancel(update):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
     update.message.reply_text(
-        text='Admin command cancelled.',
+        text=_('Admin command cancelled.'),
         reply_markup=ReplyKeyboardRemove(), parse_mode=ParseMode.MARKDOWN,
     )
     return enums.BOT_INIT
 
 
 def on_admin_fallback(bot, update):
+    user_id = get_user_id(update)
     update.message.reply_text(
-        text='Unknown input, type /cancel to exit admin mode',
+        text=_('Unknown input, type /cancel to exit admin mode'),
         reply_markup=ReplyKeyboardRemove(), parse_mode=ParseMode.MARKDOWN,
     )
     return enums.ADMIN_INIT
 
 
+@user_passes
 def on_admin_edit_working_hours(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
-    chat_id = update.effective_chat.id
     query = update.callback_query
-    if query and query.data == 'back':
-        msg_id = query.message.message_id
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'select':
+        user_data['day_selected'] = val
+        day_name = dict(WorkingHours.DAYS)[int(val)]
+        msg = _('Please enter working time in format `12:00-18:00` for {}'.format(day_name))
+        reply_markup = keyboards.cancel_button(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_ENTER_WORKING_HOURS
+    elif action == 'back':
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id)
-    new_working_hours = update.message.text
-    new_working_hours = fix_markdown(new_working_hours)
-    config.set_value('working_hours', new_working_hours)
-    msg = _('Working hours were changed.')
-    return states.enter_settings(_, bot, chat_id, user_id, msg=msg)
+    else:
+        return states.enter_unknown_command(_, bot, query)
+
+
+@user_passes
+def on_admin_enter_working_hours(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    if query:
+        if query.data == 'back':
+            del user_data['day_selected']
+            return states.enter_working_days(_, bot, chat_id, query.message.message_id, query.id)
+        else:
+            return states.enter_unknown_command(_, bot, query)
+    hours_str = update.message.text
+    hours = hours_str.split('-')
+    working_hours = []
+    time_format = '%H:%M'
+    if len(hours) == 2:
+        for val in hours:
+            val = val.strip().replace(' ', '')
+            try:
+                val = datetime.strptime(val, time_format)
+            except ValueError:
+                break
+            else:
+                working_hours.append(val)
+    if not working_hours:
+        msg = _('Incorrect time format. Please enter time in format  `12:00-18:00`')
+        reply_markup = keyboards.cancel_button(_)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_ENTER_WORKING_HOURS
+    else:
+        day = user_data['day_selected']
+        day = int(day)
+        open_time, close_time = working_hours
+        WorkingHours.create(day=day, open_time=open_time, close_time=close_time)
+        day_repr = dict(WorkingHours.DAYS)[day]
+        open_time, close_time = open_time.strftime(time_format), close_time.strftime(time_format)
+        msg = _('{} working hours was set to `{}-{}`').format(day_repr, open_time, close_time)
+        del user_data['day_selected']
+    return states.enter_working_days(_, bot, chat_id, msg=msg)
+
+
+
 
 #
 #
@@ -2879,23 +3044,29 @@ def on_admin_edit_working_hours(bot, update, user_data):
 #
 #
 
-
 def on_admin_bot_status(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     action = query.data
     chat_id, msg_id = query.message.chat_id, query.message.message_id
-    if action in ('bot_on_off', 'only_for_registered'):
+    if action in ('bot_on_off', 'only_for_registered', 'watch_non_registered', 'order_non_registered'):
         if action == 'bot_on_off':
             value = not config.bot_on_off
             config.set_value(action, value)
         else:
-            value = not config.only_for_registered
-            config.set_value(action, value)
+            old_value = getattr(config, action)
+            if old_value:
+                query.answer()
+                return enums.ADMIN_BOT_STATUS
+            actions = ['only_for_registered', 'watch_non_registered', 'order_non_registered']
+            for v in actions:
+                config.set_value(v, False)
+            config.set_value(action, True)
         msg = _('⚡️ Bot Status')
         reply_markup = keyboards.create_bot_status_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
         return enums.ADMIN_BOT_STATUS
     if action == 'back':
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id)
@@ -2915,7 +3086,7 @@ def on_admin_edit_identification_stages(bot, update, user_data):
                               reply_markup=keyboards.order_options_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_ORDER_OPTIONS
-    if action in ('toggle', 'vip_toggle', 'delete'):
+    if action in ('toggle', 'vip_toggle', 'delete', 'order_toggle'):
         stage = IdentificationStage.get(id=data)
         question = IdentificationQuestion.get(stage=stage)
         if action == 'toggle':
@@ -2924,6 +3095,9 @@ def on_admin_edit_identification_stages(bot, update, user_data):
         elif action == 'vip_toggle':
             stage.vip_required = not stage.vip_required
             stage.save()
+        elif action == 'order_toggle':
+            stage.for_order = not stage.for_order
+            stage.save()
         elif action == 'delete':
             question.delete_instance(recursive=True)
             stage.delete_instance(recursive=True)
@@ -2931,19 +3105,27 @@ def on_admin_edit_identification_stages(bot, update, user_data):
         for stage in IdentificationStage:
             first_question = stage.identification_questions[0]
             first_question = first_question.content
-            questions.append((stage.id, stage.active, stage.vip_required, first_question))
+            questions.append((stage.id, stage.active, stage.vip_required, stage.for_order, first_question))
         msg = _('👨 Edit identification process')
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_edit_identification_keyboard(_, questions),
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.edit_identification_keyboard(_, questions),
                               parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_EDIT_IDENTIFICATION_STAGES
-    if action == 'add':
-        user_data['admin_edit_identification'] = {'new': True}
-    elif action == 'edit':
-        user_data['admin_edit_identification'] = {'new': False, 'id': data}
-    msg = _('Select type of identification question')
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_edit_identification_type_keyboard(_),
-                          parse_mode=ParseMode.MARKDOWN)
-    return enums.ADMIN_EDIT_IDENTIFICATION_QUESTION_TYPE
+    if action in ('add', 'edit'):
+        if action == 'add':
+            user_data['admin_edit_identification'] = {'new': True}
+            msg = ''
+        else:
+            stage = IdentificationStage.get(id=data)
+            stage.active = False
+            stage.save()
+            user_data['admin_edit_identification'] = {'new': False, 'id': data}
+            msg = _('_Note: identification stage is disabled while editing_')
+            msg += '\n'
+        msg += _('Select type of identification question')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_edit_identification_type_keyboard(_),
+                              parse_mode=ParseMode.MARKDOWN)
+        return enums.ADMIN_EDIT_IDENTIFICATION_QUESTION_TYPE
+    return states.enter_unknown_command(_, bot, query)
 
 
 @user_passes
@@ -2953,18 +3135,24 @@ def on_admin_edit_identification_question_type(bot, update, user_data):
     query = update.callback_query
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action = query.data
+    edit_options = user_data['admin_edit_identification']
     if action == 'back':
+        if not edit_options['new']:
+            stage_id = edit_options['id']
+            stage = IdentificationStage.get(id=stage_id)
+            stage.active = True
+            stage.save()
+        del user_data['admin_edit_identification']
         questions = []
         for stage in IdentificationStage:
             first_question = stage.identification_questions[0]
             first_question = first_question.content
-            questions.append((stage.id, stage.active, stage.vip_required, first_question))
+            questions.append((stage.id, stage.active, stage.vip_required, stage.for_order, first_question))
         msg = _('👨 Edit identification process')
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_edit_identification_keyboard(_, questions),
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.edit_identification_keyboard(_, questions),
                               parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_EDIT_IDENTIFICATION_STAGES
     if action in ('photo', 'text', 'video'):
-        edit_options = user_data['admin_edit_identification']
         edit_options['type'] = action
         msg = _('Enter new question or variants to choose randomly, e.g.:\n'
                 'Send identification photo ✌️\n'
@@ -3005,52 +3193,26 @@ def on_admin_edit_identification_question(bot, update, user_data):
     else:
         stage = IdentificationStage.get(id=edit_options['id'])
         stage.type = edit_options['type']
-        stage.save()
         for q in stage.identification_questions:
             q.delete_instance()
         for q_text in msg_text.split('\n'):
             if q_text:
                 IdentificationQuestion.create(content=q_text, stage=stage)
+        stage.active = True
+        stage.save()
         msg = _('Identification question has been changed')
     questions = []
     for stage in IdentificationStage:
         first_question = stage.identification_questions[0]
         first_question = first_question.content
-        questions.append((stage.id, stage.active, stage.vip_required, first_question))
-    bot.send_message(upd_msg.chat_id, msg, reply_markup=keyboards.create_edit_identification_keyboard(_, questions),
-                          parse_mode=ParseMode.MARKDOWN)
+        questions.append((stage.id, stage.active, stage.vip_required, stage.for_order, first_question))
+    bot.send_message(upd_msg.chat_id, msg, reply_markup=keyboards.edit_identification_keyboard(_, questions),
+                     parse_mode=ParseMode.MARKDOWN)
     return enums.ADMIN_EDIT_IDENTIFICATION_STAGES
 
 
 @user_passes
-def on_admin_edit_restriction(bot, update, user_data):
-    user_id = get_user_id(update)
-    _ = get_trans(user_id)
-    query = update.callback_query
-    chat_id, msg_id = query.message.chat_id, query.message.message_id
-    callback_data = query.data
-    first, second = user_data['edit_restricted_area']
-    if callback_data == 'save':
-        msg = _('Restriction options changed')
-        bot.edit_message_text(msg, chat_id, msg_id,
-                              reply_markup=keyboards.order_options_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
-        query.answer()
-        return enums.ADMIN_ORDER_OPTIONS
-    if callback_data == 'first':
-        first = not first
-    elif callback_data == 'second':
-        second = not second
-    user_data['edit_restricted_area'] = (first, second)
-    msg = _('🔥 Edit restricted area')
-    bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
-                          reply_markup=keyboards.create_edit_restriction_keyboard(_, (first, second)))
-    query.answer()
-    return enums.ADMIN_EDIT_RESTRICTION
-
-
-@user_passes
-def on_admin_reset_all_data(bot, update):
+def on_admin_reset_all_data(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     query = update.callback_query
@@ -3062,13 +3224,13 @@ def on_admin_reset_all_data(bot, update):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_RESET_CONFIRM
-    elif action == 'no':
+    elif action in ('no', 'back'):
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id)
     return states.enter_unknown_command(_, bot, query)
 
 
 @user_passes
-def on_admin_reset_confirm(bot, update):
+def on_admin_reset_confirm(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     query = update.callback_query
@@ -3088,6 +3250,12 @@ def on_admin_reset_confirm(bot, update):
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id, msg)
     elif action == 'no':
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id)
+    elif action == 'back':
+        msg = _('You are about to delete your database, session and all messages in channels. Is that correct?')
+        reply_markup = keyboards.create_reset_all_data_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_RESET_DATA
     return states.enter_unknown_command(_, bot, query)
 
 
@@ -3112,11 +3280,7 @@ def on_admin_product_price_groups(bot, update, user_data):
         query.answer()
         return enums.ADMIN_PRODUCT_PRICE_GROUP_LIST
     else:
-        msg = _('💳 Order options')
-        bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
-                              reply_markup=keyboards.order_options_keyboard(_))
-        query.answer()
-        return enums.ADMIN_ORDER_OPTIONS
+        return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
 
 
 def on_admin_product_price_groups_list(bot, update, user_data):

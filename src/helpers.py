@@ -1,4 +1,5 @@
 import configparser
+import datetime
 import gettext
 import json
 import logging
@@ -40,11 +41,12 @@ class ConfigHelper:
                       'welcome_text': 'Welcome text not configured yet',
                       'order_text': 'Order text not configured yet',
                       'order_complete_text': 'Order text not configured yet',
-                      'working_hours': 'Working hours not configured yet',
                       'contact_info': 'Contact info not configured yet',
                       'phone_number_required': 'true',
                       'has_courier_option': 'true',
-                      'only_for_registered': 'false', 'delivery_fee': '0',
+                      'only_for_registered': 'true', 'watch_non_registered': 'false',
+                      'order_non_registered': 'false',
+                      'delivery_method': None, 'delivery_fee': '0',
                       'delivery_fee_for_vip': 'false', 'discount': '0',
                       'discount_min': '0', 'btc_enabled': 'false',
                       'btc_address': '', 'currency': Currencies.DOLLAR,
@@ -117,9 +119,12 @@ class ConfigHelper:
     def order_complete_text(self):
         return self.get_config_value('order_complete_text')
 
-    @property
-    def working_hours(self):
-        return self.get_config_value('working_hours')
+    # @property
+    # def working_hours(self):
+    #     hours = self.get_config_value('working_hours')
+    #     format = ''
+    #     hours = datetime.datetime.strptime(hours, )
+    #     return self.get_config_value('working_hours')
 
     @property
     def contact_info(self):
@@ -134,8 +139,24 @@ class ConfigHelper:
         return self.get_config_value('only_for_registered', boolean=True)
 
     @property
+    def watch_non_registered(self):
+        return self.get_config_value('watch_non_registered', boolean=True)
+
+    @property
+    def order_non_registered(self):
+        return self.get_config_value('order_non_registered', boolean=True)
+
+    @property
     def has_courier_option(self):
         return self.get_config_value('has_courier_option', boolean=True)
+
+    @property
+    def pickup(self):
+        return self.get_config_value('pickup', boolean=True)
+
+    @property
+    def delivery_method(self):
+        return self.get_config_value('delivery_method')
 
     @property
     def delivery_fee_for_vip(self):
@@ -180,9 +201,11 @@ class Cart:
     @staticmethod
     def check_cart(user_data):
         # check that cart is still here in case we've restarted
-        if 'cart' not in user_data:
-            user_data['cart'] = {}
-        return user_data['cart']
+        cart = user_data.get('cart')
+        if cart is None:
+            cart = {}
+            user_data['cart'] = cart
+        return cart
 
     @staticmethod
     def add(user_data, product_id):
@@ -194,10 +217,8 @@ class Cart:
             query = (ProductCount.product == product)
         prices = ProductCount.select().where(query).order_by(ProductCount.count.asc())
         counts = [x.count for x in prices]
-        min_count = counts[0]
-
         if product_id not in cart:
-            cart[product_id] = min_count
+            cart[product_id] = counts[0]
         else:
             # add more
             current_count = cart[product_id]
@@ -206,13 +227,12 @@ class Cart:
             next_count_index = (current_count_index + 1) % len(counts)
             cart[product_id] = counts[next_count_index]
         user_data['cart'] = cart
-
         return user_data
 
     @staticmethod
     def remove(user_data, product_id):
         cart = Cart.check_cart(user_data)
-        product_id = str(product_id)
+        product_id = product_id
         product = Product.get(id=product_id)
         if product.group_price:
             query = (ProductCount.product_group == product.group_price)
@@ -232,6 +252,16 @@ class Cart:
                 cart[product_id] = counts[next_count_index]
         user_data['cart'] = cart
 
+        return user_data
+
+    @staticmethod
+    def remove_all(user_data, product_id):
+        cart = Cart.check_cart(user_data)
+        try:
+            del cart[product_id]
+        except KeyError:
+            pass
+        user_data['cart'] = cart
         return user_data
 
     @staticmethod
@@ -462,7 +492,7 @@ def init_bot_tables():
     }
     for conf_name, data in channels_map.items():
         try:
-            channel = Channel.get(conf_name=conf_name)
+            Channel.get(conf_name=conf_name)
         except Channel.DoesNotExist:
             name = data['name']
             perms = data['perms']
@@ -497,6 +527,16 @@ def fix_markdown(message):
             message = '\\{}'.format(char).join(msg_li)
     return message
 
+
+def get_service_channel():
+    return Channel.get(conf_name='service_channel')
+
+
+def get_reviews_channel():
+    return Channel.get(conf_name='reviews_channel')
+
+def get_couriers_channel():
+    return Channel.get(conf_name='couriers_channel')
 
 cat = gettext.GNUTranslations(open('he.mo', 'rb'))
 config = ConfigHelper()
