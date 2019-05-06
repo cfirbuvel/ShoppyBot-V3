@@ -53,18 +53,7 @@ def on_menu(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     username = get_username(update)
-    # try:
-    #     user = User.get(telegram_id=user_id)
-    # except User.DoesNotExist:
-    #     locale = get_locale(update)
-    #     default_permission = UserPermission.get(permission=UserPermission.NOT_REGISTERED)
-    #     user = User(telegram_id=user_id, username=username, locale=locale, permission=default_permission)
-    #     user.save()
-    # else:
-    #     if username != user.username:
-    #         user.username = username
-    #         user.save()
-
+    user = User.get(telegram_id=user_id)
     query = update.callback_query
     data = query.data
     chat_id, msg_id = query.message.chat_id, query.message.message_id
@@ -1519,6 +1508,16 @@ def service_channel_courier_query_handler(bot, update, user_data):
                 keyboard = keyboards.courier_confirmation_keyboard(order_id, courier_nickname, _, answers_ids, assigned_msg_id)
                 shortcuts.send_channel_msg(bot, msg, config.get_service_channel(), keyboard, order)
                 query.answer(text=_('Courier {} assigned').format(courier_nickname), show_alert=True)
+
+
+@user_passes
+def on_courier_confirm(bot, update, user_data):
+    pass
+
+
+@user_passes
+def on_courier_unconfirm(bot, update, user_data):
+    pass
 
 
 # def send_welcome_message(bot, update):

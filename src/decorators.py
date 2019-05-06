@@ -19,7 +19,6 @@ def user_passes(func):
         try:
             user = User.get(telegram_id=user_id)
         except User.DoesNotExist:
-            locale = get_locale(update)
             default_permission = UserPermission.get(permission=UserPermission.NOT_REGISTERED)
             user = User(telegram_id=user_id, username=username, locale=locale, permission=default_permission)
             user.save()

@@ -558,14 +558,10 @@ def main():
         CallbackQueryHandler(handlers.on_service_order_message, pattern='^order',pass_user_data=True)
     )
     updater.dispatcher.add_handler(CallbackQueryHandler(handlers.cancel_order_confirm, pattern='^cancel_order'))
-    # updater.dispatcher.add_handler(
-    #     CallbackQueryHandler(make_confirm,
-    #                          pattern='^confirmed',
-    #                          pass_user_data=True))
-    # updater.dispatcher.add_handler(
-    #     CallbackQueryHandler(make_unconfirm,
-    #                          pattern='^notconfirmed',
-    #                          pass_user_data=True))
+    updater.dispatcher.add_handler(
+        CallbackQueryHandler(handlers.on_courier_confirm, pattern='^confirmed', pass_user_data=True))
+    updater.dispatcher.add_handler(
+        CallbackQueryHandler(handlers.on_courier_unconfirm, pattern='^notconfirmed', pass_user_data=True))
     updater.dispatcher.add_handler((
         CallbackQueryHandler(handlers.delete_message, pattern='delete_msg')
     ))
