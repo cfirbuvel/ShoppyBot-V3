@@ -16,6 +16,21 @@ class BaseModel(Model):
         database = db
 
 
+class Currencies:
+    DOLLAR = 'USD'
+    EURO = 'EUR'
+    POUND = 'GBP'
+    ILS = 'ILS'
+
+    CURRENCIES = {
+        DOLLAR: (_('Dollar'), '$'), EURO: (_('Euro'), '€'), POUND: (_('Pound'), '£'), ILS: (_('Shekel'), '₪')
+    }
+
+    CHOICES = [
+        (DOLLAR, 'Dollar'), (EURO, 'Euro'), (POUND, 'Pound'), (ILS, 'Shekel')
+    ]
+
+
 class ConfigValue(BaseModel):
     name = CharField()
     value = CharField()
@@ -60,7 +75,7 @@ class UserPermission(BaseModel):
     PENDING_REGISTRATION = 10
 
     PERMISSIONS = (
-        (OWNER, _('Owner')), (LOGISTIC_MANAGER, _('Logistic manager')), (COURIER, _('Courier')),
+        (OWNER, _('Admin')), (LOGISTIC_MANAGER, _('Logistic manager')), (COURIER, _('Courier')),
         (AUTHORIZED_RESELLER, _('Authorized reseller')), (FAMILY, _('Family')), (FRIEND, _('Friend')),
         (VIP_CLIENT, _('Vip client')), (CLIENT, _('Client')), (NOT_REGISTERED, _('Not registered')),
         (PENDING_REGISTRATION, _('Pending registration'))
@@ -83,6 +98,7 @@ class User(BaseModel):
     permission = ForeignKeyField(UserPermission, related_name='users')
     banned = BooleanField(default=False)
     registration_time = DateTimeField(default=datetime.datetime.now)
+    currency = CharField(default=Currencies.DOLLAR, choices=Currencies.CHOICES)
 
     @property
     def is_admin(self):
@@ -135,6 +151,11 @@ class ProductCategory(BaseModel):
 
 class GroupProductCount(BaseModel):
     name = CharField()
+
+
+class GroupProductCountPermission(BaseModel):
+    price_group = ForeignKeyField(GroupProductCount, related_name='permissions')
+    permission = ForeignKeyField(UserPermission, related_name='group_counts')
 
 
 class Product(BaseModel):
@@ -224,19 +245,6 @@ class BtcStage:
     SECOND = 2
 
 
-# class RaceConditionType:
-
-
-# class RaceCondition(BaseModel):
-#     IDENTIFICATION = 1
-#     PRODUCT = 2
-#     CHOICES = (
-#         (IDENTIFICATION, 'Identification'), (PRODUCT, 'Product')
-#     )
-#     user = ForeignKeyField(User, related_name='race_condition')
-#     type = IntegerField(null=True, choices=CHOICES)
-#     timer =
-
 class OrderBtcPayment(BaseModel):
     order = ForeignKeyField(Order, related_name='btc_data')
     address = CharField(null=True)
@@ -294,26 +302,11 @@ class ChannelMessageData(BaseModel):
     order = ForeignKeyField(Order, related_name='channel_messages', null=True)
 
 
-class Currencies:
-    DOLLAR = 'USD'
-    EURO = 'EUR'
-    POUND = 'GBP'
-    ILS = 'ILS'
-
-    CURRENCIES = {
-        DOLLAR: (_('Dollar'), '$'), EURO: (_('Euro'), '€'), POUND: (_('Pound'), '£'), ILS: (_('Shekel'), '₪')
-    }
-
-    CHOICES = [
-        (DOLLAR, 'Dollar'), (EURO, 'Euro'), (POUND, 'Pound'), (ILS, 'Shekel')
-    ]
-
-
 class CurrencyRates(BaseModel):
     currency = CharField(default=Currencies.DOLLAR, choices=Currencies.CHOICES)
     btc_rate = DecimalField()
     dollar_rate = DecimalField()
-    last_updated = DateTimeField(default=datetime.datetime.now)
+    # last_updated = DateTimeField(default=datetime.datetime.now)
 
 
 class BitcoinCredentials(BaseModel):
@@ -335,7 +328,7 @@ def create_tables():
             Order, OrderItem, ProductWarehouse, ProductMedia, IdentificationStage,
             OrderIdentificationAnswer, IdentificationQuestion, ChannelMessageData, GroupProductCount,
             CurrencyRates, BitcoinCredentials, OrderBtcPayment, BtcProc, ConfigValue, UserIdentificationAnswer, CourierLocation,
-            WorkingHours
+            WorkingHours, GroupProductCountPermission
         ], safe=True
     )
 

@@ -4,111 +4,14 @@ import operator
 from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
 
+from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, get_full_product_info, get_currency_symbol
+from .btc_wrapper import CurrencyConverter
+from .cart_helper import Cart
+
 from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission,\
-    UserIdentificationAnswer, Product, ProductCategory, WorkingHours
-
-from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, Cart, get_full_product_info
+    UserIdentificationAnswer, Product, ProductCategory, WorkingHours, Currencies, User, CurrencyRates, \
+    BitcoinCredentials, Channel, ChannelPermissions
 from . import keyboards, messages, states
-
-
-# def make_confirm(bot, update, user_data):
-#     query = update.callback_query
-#     data = query.data
-#     label, order_id, courier_name = data.split('|')
-#     delete_channel_msg(bot, config.get_service_channel(), query.message.message_id)
-#     try:
-#         order = Order.get(id=order_id)
-#     except Order.DoesNotExist:
-#         logger.info('Order № {} not found!'.format(order_id))
-#     else:
-#         order.confirmed = True
-#         order.save()
-#
-#         user_id = order.user.telegram_id
-#         _ = get_trans(user_id)
-#         courier_name = escape_markdown(courier_name)
-#         bot.send_message(
-#             user_id,
-#             text=_('Courier @{} assigned to your order').format(courier_name),
-#             parse_mode=ParseMode.MARKDOWN,
-#         )
-#         courier_id = order.courier.telegram_id
-#         user_data = get_user_session(courier_id)
-#         user_data['courier']['order_id'] = order_id
-#         session_client.json_set(courier_id, user_data)
-#         order_data = OrderPhotos.get(order==order)
-#         _ = get_trans(courier_id)
-#         bot.send_message(courier_id,
-#                          text=order_data.order_text,
-#                          reply_markup=keyboards.courier_order_status_keyboard(_, order_id),
-#                          parse_mode=ParseMode.MARKDOWN)
-
-
-# def make_unconfirm(bot, update, user_data):
-#     query = update.callback_query
-#     data = query.data
-#     label, order_id, courier_name, answers_ids, assigned_msg_id = data.split('|')
-#     delete_channel_msg(bot, config.service_channel, query.message.message_id)
-#     couriers_channel = config.couriers_channel
-#     for answer_id in answers_ids.split(','):
-#         delete_channel_msg(bot, couriers_channel, answer_id)
-#     delete_channel_msg(bot, couriers_channel, assigned_msg_id)
-#     try:
-#         order = Order.get(id=order_id)
-#     except Order.DoesNotExist:
-#         logger.info('Order № {} not found!'.format(order_id))
-#     else:
-#         change_order_products_credits(order, True, order.courier)
-#         order.courier = None
-#         order.save()
-#         _ = get_channel_trans()
-#         order_data = OrderPhotos.get(order=order)
-#         msg = _('The admin did not confirm. Please retake '
-#                 'responsibility for order №{}').format(order_id)
-#         send_channel_msg(bot, msg, couriers_channel, order=order)
-#         answers_ids = send_order_identification_answers(bot, couriers_channel, order, send_one=True, channel=True)
-#         answers_ids = ','.join(answers_ids)
-#         order_info = Order.get(id=order_id)
-#         order_pickup_state = order_info.shipping_method
-#         order_location = order_info.location
-#         if order_location:
-#             order_location = order_location.title
-#         keyboard = keyboards.service_notice_keyboard(order_id, _, answers_ids, order_location, order_pickup_state)
-#         send_channel_msg(bot, order_data.order_text, couriers_channel, keyboard, order)
-
-
-# def resend_responsibility_keyboard(bot, update):
-#     query = update.callback_query
-#     data = query.data
-#     order_id = data.split('|')[1]
-#     try:
-#         order = Order.get(id=order_id)
-#     except Order.DoesNotExist:
-#         logger.info('Order № {} not found!'.format(order_id))
-#         return
-#     else:
-#         change_order_products_credits(order, True, order.courier)
-#         order.confirmed = False
-#         order.courier = None
-#         order.save()
-#     couriers_channel = config.couriers_channel
-#     _ = get_channel_trans()
-#     bot.delete_message(query.message.chat_id,
-#                        message_id=query.message.message_id)
-#     order_data = OrderPhotos.get(order=order)
-#     msg = _('Order №{} was dropped by courier').format(order_id)
-#     send_channel_msg(bot, msg, couriers_channel, order=order)
-#     answers_ids = send_order_identification_answers(bot, couriers_channel, order, send_one=True, channel=True)
-#     answers_ids = ','.join(answers_ids)
-#
-#     order_info = Order.get(id=order_id)
-#     order_pickup_state = order_info.shipping_method
-#     order_location = order_info.location
-#     if order_location:
-#         order_location = order_location.title
-#     keyboard = keyboards.service_notice_keyboard(order_id, _, answers_ids, order_location, order_pickup_state)
-#     send_channel_msg(bot, order_data.order_text, couriers_channel, keyboard, order)
-#     query.answer(text=_('Order sent to couriers channel'), show_alert=True)
 
 
 # def bot_send_order_msg(_, bot, chat_id, message, order_id, order_data=None, channel=False, parse_mode=ParseMode.MARKDOWN):
@@ -406,7 +309,7 @@ def send_product_media(bot, product, chat_id):
     return messages_ids
 
 
-def send_products(_, bot, user_data, chat_id, products):
+def send_products(_, bot, user_data, chat_id, products, currency):
     msgs_ids = []
     for product in products:
         product_id = product.id
@@ -415,43 +318,43 @@ def send_products(_, bot, user_data, chat_id, products):
         product_title, prices = get_full_product_info(product_id)
         media_ids = send_product_media(bot, product, chat_id)
         msgs_ids += media_ids
-        msg = messages.create_product_description(_, product_title, prices, product_count, subtotal)
+        msg = messages.create_product_description(_, currency, product_title, prices, product_count, subtotal)
         reply_markup = keyboards.create_product_keyboard(_, product_id, user_data)
         msg = bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, timeout=20)
         msgs_ids.append(msg['message_id'])
     return msgs_ids
 
 
-def product_inactive(_, bot, user_data, update, product):
-    query = update.callback_query
-    chat_id = update.effective_chat.id
-    msg = _('Sorry, product "{}" is not active now.').format(product.title)
-    query.answer(msg)
-    Cart.remove_all(user_data, product.id)
-    products_msgs = user_data.get('products_msgs')
-    if products_msgs:
-        for p_msg_id in products_msgs:
-            bot.delete_message(chat_id, p_msg_id)
-        del user_data['products_msgs']
-    category_id = user_data.get('category_id')
-    if category_id:
-        cat = ProductCategory.get(id=category_id)
-        cat_title = escape_markdown(cat.title)
-        msg = _('Category `{}` products:').format(cat_title)
-        cat_msg = bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
-        products_msgs = [cat_msg['message_id']]
-        products = Product.select().where(Product.is_active == True, Product.category == cat)
-        if products.exists():
-            products_msgs += send_products(_, bot, user_data, chat_id, products)
-            user_data['products_msgs'] = products_msgs
-        return states.enter_menu(bot, update, user_data)
-    else:
-        products = Product.select().where(Product.is_active == True)
-        if products.exists():
-            products_msgs = send_products(_, bot, user_data, chat_id, products)
-            user_data['products_msgs'] = products_msgs
-        menu_msg_id = user_data['menu_id']
-        return states.enter_menu(bot, update, user_data, menu_msg_id)
+# def product_inactive(_, bot, user_data, update, product, currency):
+#     query = update.callback_query
+#     chat_id = update.effective_chat.id
+#     msg = _('Sorry, product "{}" is not active now.').format(product.title)
+#     query.answer(msg)
+#     Cart.remove_all(user_data, product.id)
+#     products_msgs = user_data.get('products_msgs')
+#     if products_msgs:
+#         for p_msg_id in products_msgs:
+#             bot.delete_message(chat_id, p_msg_id)
+#         del user_data['products_msgs']
+#     category_id = user_data.get('category_id')
+#     if category_id:
+#         cat = ProductCategory.get(id=category_id)
+#         cat_title = escape_markdown(cat.title)
+#         msg = _('Category `{}` products:').format(cat_title)
+#         cat_msg = bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
+#         products_msgs = [cat_msg['message_id']]
+#         products = Product.select().where(Product.is_active == True, Product.category == cat)
+#         if products.exists():
+#             products_msgs += send_products(_, bot, user_data, chat_id, products, currency)
+#             user_data['products_msgs'] = products_msgs
+#         return states.enter_menu(bot, update, user_data)
+#     else:
+#         products = Product.select().where(Product.is_active == True)
+#         if products.exists():
+#             products_msgs = send_products(_, bot, user_data, chat_id, products, currency)
+#             user_data['products_msgs'] = products_msgs
+#         menu_msg_id = user_data['menu_id']
+#         return states.enter_menu(bot, update, user_data, menu_msg_id)
 
 
 def send_channel_msg(bot, msg, chat_id, keyboard=None, order=None, parse_mode=ParseMode.MARKDOWN,):
@@ -538,7 +441,7 @@ def get_product_prices_str(trans, product):
     else:
         product_counts = product.product_counts
     for price in product_counts:
-        prices_str += _('x {} = ${}\n').format(price.count, price.price)
+        prices_str += _('x {} = {}{}\n').format(price.count, price.price, get_currency_symbol())
     return prices_str
 
 
@@ -547,6 +450,57 @@ def remove_user_registration(user):
     user.permission = UserPermission.NOT_REGISTERED
     user.phone_number = None
     user.save()
+
+
+def init_bot_tables():
+    for perm, _ in UserPermission.PERMISSIONS:
+        try:
+            UserPermission.get(permission=perm)
+        except UserPermission.DoesNotExist:
+            UserPermission.create(permission=perm)
+
+    owner_id = config.owner_id
+    if owner_id is None:
+        raise AssertionError('Please set Owner ID in config file before starting the bot.')
+    try:
+        User.get(telegram_id=owner_id)
+    except User.DoesNotExist:
+        owner_perm = UserPermission.get(permission=UserPermission.OWNER)
+        User.create(telegram_id=owner_id, permission=owner_perm)
+
+    btc_creds = BitcoinCredentials.select().first()
+    if not btc_creds:
+        BitcoinCredentials.create()
+
+    channels_map = {
+        'reviews_channel': {'name': 'Reviews channel', 'perms': (1, 2, 3, 4, 5, 6, 7, 8)},
+        'service_channel': {'name': 'Service channel', 'perms': (1, 2)},
+        'customers_channel': {'name': 'Customers channel', 'perms': (1, 2, 4, 5, 6, 7, 8)},
+        'vip_customers_channel': {'name': 'Vip customers channel', 'perms': (1, 2, 7)},
+        'couriers_channel': {'name': 'Couriers channel', 'perms': (1, 2, 3)}
+    }
+    currencies_query = CurrencyRates.select()
+    if not currencies_query.exists():
+        CurrencyConverter.fetch_update_currencies()
+        if not currencies_query.exists():
+            raise AssertionError('Couldn\'t fetch currencies from "apilayer" API')
+    for conf_name, data in channels_map.items():
+        try:
+            Channel.get(conf_name=conf_name)
+        except Channel.DoesNotExist:
+            name = data['name']
+            perms = data['perms']
+            conf_id = conf_name + '_id'
+            conf_link = conf_name + '_link'
+            channel_id = config.get_config_value(conf_id)
+            channel_link = config.get_config_value(conf_link)
+            if not channel_link or not channel_id:
+                raise AssertionError('Please specify both "{}" and "{}" config values'.format(conf_id, conf_link))
+            channel = Channel.create(name=name, channel_id=channel_id, link=channel_link, conf_name=conf_name)
+            for val in perms:
+                perm = UserPermission.get(permission=val)
+                ChannelPermissions.create(channel=channel, permission=perm)
+
 
 
 # def black_list_user(_, bot, user):

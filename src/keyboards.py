@@ -5,7 +5,8 @@ import random
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-from .helpers import config, Cart
+from .cart_helper import Cart
+from .helpers import config
 from .models import Currencies, Channel, Location, Order
 
 
@@ -122,15 +123,15 @@ def service_notice_keyboard(order_id, trans, answers_ids, order_location, delive
     return InlineKeyboardMarkup(buttons)
 
 
-def courier_confirmation_keyboard(order_id, courier_name, trans, answers_id, assigned_msg_id):
+def courier_confirmation_keyboard(order_id, trans, answers_id, assigned_msg_id):
     _ = trans
     buttons = [
         InlineKeyboardButton(_('Yes'),
-                             callback_data='confirmed_courier|{}|{}'.format(
-                                 order_id, courier_name)),
+                             callback_data='confirmed_courier|{}'.format(
+                                 order_id)),
         InlineKeyboardButton(_('No'),
-                             callback_data='notconfirmed_courier|{}|{}|{}|{}'.format(
-                                 order_id, courier_name, answers_id, assigned_msg_id)),
+                             callback_data='notconfirmed_courier|{}|{}|{}'.format(
+                                 order_id, answers_id, assigned_msg_id)),
     ]
     return InlineKeyboardMarkup([buttons])
 
@@ -153,11 +154,14 @@ def registration_keyboard(_):
 
 
 def main_keyboard(_, user):
+    lang_map = {'iw': _('עברית 🇮🇱'), 'en': _('🇺🇸 English')}
+    language_str = lang_map[user.locale]
     buttons = [
         [InlineKeyboardButton(_('⭐ Channels'), callback_data='menu_channels')],
         [InlineKeyboardButton(_('⏰ Working hours'), callback_data='menu_hours'),
          InlineKeyboardButton(_('☎ Contact info'), callback_data='menu_contact')],
-        [InlineKeyboardButton(_('🈚️ Bot Languages'), callback_data='menu_language')]
+        [InlineKeyboardButton(language_str, callback_data='menu_language'),
+         InlineKeyboardButton(_('💲 Bot Currency'), callback_data='menu_currency')]
     ]
     first_btns = [InlineKeyboardButton(_('🛍 Checkout'), callback_data='menu_order'),
                   InlineKeyboardButton(_('🏪 Our products'), callback_data='menu_products')]
@@ -200,13 +204,13 @@ def create_my_order_keyboard(_, order_id, cancel):
     return InlineKeyboardMarkup(buttons)
 
 
-def bot_language_keyboard(_):
+def bot_language_keyboard(_, selected_language):
     msg_map = (
         ('iw', _('עברית 🇮🇱{}')), ('en', _('🇺🇸 English{}'))
     )
     buttons = []
     for code, name in msg_map:
-        if code == config.default_language:
+        if code == selected_language:
             selected_str = _(': ✅ Yes')
         else:
             selected_str = ''
@@ -945,10 +949,18 @@ def create_product_price_groups_keyboard(trans):
     return InlineKeyboardMarkup(buttons)
 
 
+# def add_product_price_group_keyboard(_):
+#     buttons = [
+#         [InlineKeyboardButton(_('Add for special clients'), callback_data='special_clients')],
+#         [InlineKeyboardButton(_('Add for all clients'), callback_data='all_clients')]
+#     ]
+
+
 def create_product_price_group_selected_keyboard(trans, group_id):
     _ = trans
     buttons = [
         [InlineKeyboardButton(_('✏️ Edit price group'), callback_data='edit|{}'.format(group_id))],
+        [InlineKeyboardButton(_('👫 Special clients'), callback_data='special_clients|{}'.format(group_id))],
         [InlineKeyboardButton(_('❌ Delete price group'), callback_data='delete|{}'.format(group_id))],
         [InlineKeyboardButton(_('↩ Back'), callback_data='back|{}'.format(group_id))]
     ]
@@ -1017,3 +1029,8 @@ def create_bitcoin_retry_keyboard(trans, order_id):
         [InlineKeyboardButton(_('🔄 Try again'), callback_data='btc_processing_start|{}'.format(order_id))]
     ]
     return InlineKeyboardMarkup(buttons)
+
+
+def start_btn(_):
+    buttons = [InlineKeyboardButton(_('Start'), callback_data='start_bot')]
+    return InlineKeyboardMarkup([buttons])

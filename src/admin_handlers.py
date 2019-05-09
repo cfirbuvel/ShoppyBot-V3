@@ -11,15 +11,16 @@ from telegram.utils.helpers import escape_markdown, escape
 from . import enums, keyboards, shortcuts, messages, states
 from . import shortcuts
 from . import messages
-from .btc_wrapper import wallet_enable_hd
+from .btc_wrapper import wallet_enable_hd, CurrencyConverter
 from .decorators import user_passes
 # from .btc_processor import process_btc_payment, set_btc_proc
 from .helpers import get_user_id, config, get_trans, parse_discount, get_channel_trans, get_locale, get_username,\
-    logger, is_admin, fix_markdown, init_bot_tables
+    logger, is_admin, fix_markdown, get_service_channel, get_currency_symbol
 from .models import Product, ProductCount, Location, ProductWarehouse, User, \
     ProductMedia, ProductCategory, IdentificationStage, Order, IdentificationQuestion, \
     ChannelMessageData, GroupProductCount, delete_db, create_tables, Currencies, BitcoinCredentials, \
-    Channel, UserPermission, ChannelPermissions, CourierLocation, WorkingHours
+    Channel, UserPermission, ChannelPermissions, CourierLocation, WorkingHours, GroupProductCountPermission, \
+    OrderBtcPayment, CurrencyRates
 
 
 def on_cmd_add_product(bot, update):
@@ -376,7 +377,7 @@ def on_bot_settings_menu(bot, update, user_data):
         return enums.ADMIN_ORDER_OPTIONS
     elif data == 'bot_settings_language':
         msg = _('🈚️ Default language:')
-        reply_markup = keyboards.bot_language_keyboard(_)
+        reply_markup = keyboards.bot_language_keyboard(_, config.default_language)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_BOT_LANGUAGE
@@ -436,7 +437,7 @@ def on_bot_language(bot, update, user_data):
     if action in ('iw', 'en'):
         config.set_value('default_language', action)
         msg = _('🈚️ Default language:')
-        reply_markup = keyboards.bot_language_keyboard(_)
+        reply_markup = keyboards.bot_language_keyboard(_, config.default_language)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_BOT_LANGUAGE
@@ -990,7 +991,7 @@ def on_pending_registrations_black_list(bot, update, user_data):
             user.save()
             username = escape_markdown(user.username)
             banned_trans = get_trans(user.telegram_id)
-            msg = banned_trans('{}, you have been banned.').format(username)
+            msg = banned_trans('{}, you have been black-listed.').format(username)
             bot.send_message(user.telegram_id, msg)
             msg = _('User *{}* has been banned.').format(username)
             page = user_data['listing_page']
@@ -1097,7 +1098,7 @@ def on_channels(bot, update, user_data):
         return enums.ADMIN_CHANNELS_SET_NAME
     elif data == 'bot_channels_language':
         msg = _('🈚︎ Select language:')
-        reply_markup = keyboards.bot_language_keyboard(_)
+        reply_markup = keyboards.bot_language_keyboard(_, config.channels_language)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_CHANNELS_LANGUAGE
@@ -1360,7 +1361,7 @@ def on_channel_add(bot, update, user_data):
 
 
 @user_passes
-def on_channels_language(bot, update):
+def on_channels_language(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -1369,7 +1370,7 @@ def on_channels_language(bot, update):
     if action in ('iw', 'en'):
         config.set_value('channels_language', action)
         msg = _('🈚︎ Select language:')
-        reply_markup = keyboards.bot_language_keyboard(_)
+        reply_markup = keyboards.bot_language_keyboard(_, config.channels_language)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_CHANNELS_LANGUAGE
@@ -1416,13 +1417,17 @@ def on_admin_order_options(bot, update, user_data):
         query.answer()
         return enums.ADMIN_WAREHOUSE_PRODUCTS
     elif data == 'bot_order_options_discount':
+        currency_str, currency_sym = Currencies.CURRENCIES[config.currency]
+        msg = _('Enter discount like:\n'
+                '50 > 500: all deals above 500{0} will be -50{0}\n'
+                '10% > 500: all deals above 500{0} will be -10%\n'
+                '*Current discount: {1} > {2}*').format(currency_sym, config.discount, config.discount_min)
+        msg += '\n\n'
+        msg += _('Currency: {} {}').format(currency_str, currency_sym)
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=msg_id,
-            text=_('Enter discount like:\n'
-                   '50 > 500: all deals above 500$ will be -50$\n'
-                   '10% > 500: all deals above 500$ will be -10%\n'
-                   'Current discount: {} > {}').format(config.discount, config.discount_min),
+            text=msg,
             reply_markup=keyboards.cancel_button(_),
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -1432,10 +1437,10 @@ def on_admin_order_options(bot, update, user_data):
         return states.enter_delivery_options(_, bot, chat_id, msg_id, query.id)
     elif data == 'bot_order_options_price_groups':
         msg = _('💸 Product price groups')
-        bot.edit_message_text(msg, chat_id, msg, parse_mode=ParseMode.MARKDOWN,
+        bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
                               reply_markup=keyboards.create_product_price_groups_keyboard(_))
         query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUPS
+        return enums.ADMIN_PRODUCT_PRICE_GROUP
     elif data == 'bot_order_options_add_locations':
         return states.enter_locations(_, bot, chat_id, msg_id, query.id)
     elif data == 'bot_order_options_identify':
@@ -1463,10 +1468,10 @@ def on_admin_orders(bot, update, user_data):
     if action == 'back':
         return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
     if action == 'pending':
-        orders = Order.select().where(Order.delivered == False)
+        orders = Order.select().where(Order.status.in_((Order.CONFIRMED, Order.PROCESSING)))
         orders_data = [(order.id, order.date_created.strftime('%d/%m/%Y')) for order in orders]
         orders = [(_('Order №{} {}').format(order_id, order_date), order_id) for order_id, order_date in orders_data]
-        user_data['admin_pending_orders'] = orders
+        user_data['listing_page'] = 1
         keyboard = keyboards.general_select_one_keyboard(_, orders)
         msg = _('Please select an order\nBot will send it to service channel')
         bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
@@ -1485,37 +1490,46 @@ def on_admin_orders_pending_select(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
-    chat_id = query.message.chat_id
-    message_id = query.message.message_id
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
     action, val = query.data.split('|')
     if action == 'back':
-        bot.edit_message_text(_('📖 Orders'), chat_id, message_id, reply_markup=keyboards.bot_orders_keyboard(_),
+        del user_data['listing_page']
+        bot.edit_message_text(_('📖 Orders'), chat_id, msg_id, reply_markup=keyboards.bot_orders_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_ORDERS
     if action == 'page':
-        orders = user_data['admin_pending_orders']
-        keyboard = keyboards.general_select_one_keyboard(_, orders, int(val))
+        orders = user_data['admin_orders']['list']
+        page = int(val)
+        user_data['admin_orders']['page'] = page
+        keyboard = keyboards.general_select_one_keyboard(_, orders, page)
         msg = _('Please select an order\nBot will send it to service channel')
-        bot.edit_message_text(msg, chat_id, message_id,
-                              reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_ORDERS_PENDING_SELECT
     elif action == 'select':
         service_trans = get_channel_trans()
         order = Order.get(id=val)
-        user_name = escape_markdown(order.user.username)
+        user_name = order.user.username
         if order.location:
-            location = escape_markdown(order.location.title)
+            location = order.location.title
         else:
             location = '-'
         msg = service_trans('Order №{}, Location {}\nUser @{}').format(val, location, user_name)
-        shortcuts.bot_send_order_msg(bot, config.service_channel, msg, service_trans, val)
-        msg = _('💳 Order options')
-        bot.edit_message_text(msg, chat_id, message_id, parse_mode=ParseMode.MARKDOWN,
-                              reply_markup=keyboards.order_options_keyboard(_))
+        reply_markup = keyboards.show_order_keyboard(_, order.id)
+        shortcuts.send_channel_msg(bot, msg, get_service_channel(), reply_markup, order, parse_mode=None)
+        orders = Order.select().where(Order.status.in_((Order.CONFIRMED, Order.PROCESSING)))
+        orders_data = [(order.id, order.date_created.strftime('%d/%m/%Y')) for order in orders]
+        orders = [(_('Order №{} {}').format(order_id, order_date), order_id) for order_id, order_date in orders_data]
+        page = user_data['listing_page']
+        keyboard = keyboards.general_select_one_keyboard(_, orders, page_num=page)
+        msg = _('Please select an order\nBot will send it to service channel')
+        bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
+                              reply_markup=keyboard)
         query.answer(text=_('Order has been sent to service channel'), show_alert=True)
-    return enums.ADMIN_ORDER_OPTIONS
+        return enums.ADMIN_ORDERS_PENDING_SELECT
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
 @user_passes
@@ -1535,10 +1549,10 @@ def on_admin_orders_finished_date(bot, update, user_data):
         query.answer()
         return enums.ADMIN_ORDERS
     elif action in ('day', 'month', 'year'):
-        year, month = user_data['calendar_date']
+        year, month = user_data['calendar']['year'], user_data['calendar']['month']
         queries = shortcuts.get_order_subquery(action, val, month, year)
-        orders = Order.select().where(*queries)
-        orders = orders.select().where((Order.delivered == True), (Order.canceled == False))
+        orders = Order.select().where(Order.status == Order.FINISHED, *queries)
+        # orders = orders.select().where(Order.status == Order.FINISHED)
         orders_data = [(order.id, order.user.username, order.date_created.strftime('%d/%m/%Y')) for order in orders]
         orders = [(_('Order №{} @{} {}').format(order_id, user_name, order_date), order_id) for order_id, user_name, order_date in orders_data]
         user_data['admin_finished_orders'] = orders
@@ -1549,34 +1563,40 @@ def on_admin_orders_finished_date(bot, update, user_data):
         return enums.ADMIN_ORDERS_FINISHED_SELECT
 
 
-# def on_admin_orders_finished_select(bot, update, user_data):
-#     query = update.callback_query
-#     user_id = get_user_id(update)
-#     _ = get_trans(user_id)
-#     action, val = query.data.split('|')
-#     chat_id = query.message.chat_id
-#     message_id = query.message.message_id
-#     if action == 'back':
-#         state = enums.ADMIN_ORDERS_FINISHED_DATE
-#         shortcuts.initialize_calendar(bot, user_data, chat_id, message_id, state, _, query.id)
-#         return state
-#     orders = user_data['admin_finished_orders']
-#     if action == 'page':
-#         page_num = int(val)
-#         keyboard = keyboards.general_select_one_keyboard(_, orders, page_num)
-#         msg = _('Select order')
-#     elif action == 'select':
-#         order = Order.get(id=val)
-#         msg = OrderPhotos.get(order=order).order_text
-#         courier_username = escape_markdown(order.courier.username)
-#         courier_delivered = _('Courier: {}').format(courier_username)
-#         msg += '\n\n' + courier_delivered
-#         keyboard = keyboards.general_select_one_keyboard(_, orders)
-#     bot.edit_message_text(msg, chat_id, message_id,
-#                           reply_markup=keyboard)
-#     query.answer()
-#     return enums.ADMIN_ORDERS_FINISHED_SELECT
+@user_passes
+def on_admin_orders_finished_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    action, val = query.data.split('|')
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    if action == 'back':
+        state = enums.ADMIN_ORDERS_FINISHED_DATE
+        shortcuts.initialize_calendar(bot, user_data, chat_id, msg_id, state, _, query.id)
+        return state
+    orders = user_data['admin_finished_orders']
+    if action == 'page':
+        page_num = int(val)
+        keyboard = keyboards.general_select_one_keyboard(_, orders, page_num)
+        msg = _('Select order')
+    elif action == 'select':
+        order = Order.get(id=val)
+        try:
+            btc_data = OrderBtcPayment.get(id=order)
+        except OrderBtcPayment.DoesNotExist:
+            btc_data = None
+        msg = messages.create_service_notice(_, order, btc_data)
+        courier_username = escape_markdown(order.courier.username)
+        courier_delivered = _('Courier: {}').format(courier_username)
+        msg += '\n\n' + courier_delivered
+        keyboard = keyboards.general_select_one_keyboard(_, orders)
+    bot.edit_message_text(msg, chat_id, msg_id,
+                          reply_markup=keyboard)
+    query.answer()
+    return enums.ADMIN_ORDERS_FINISHED_SELECT
 
+
+@user_passes
 def on_delivery(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1597,6 +1617,7 @@ def on_delivery(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_delivery_methods(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1633,6 +1654,7 @@ def on_delivery_methods(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_delivery_fee(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1650,6 +1672,7 @@ def on_delivery_fee(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_delivery_fee_add(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1658,7 +1681,7 @@ def on_delivery_fee_add(bot, update, user_data):
     action = query.data
     if action == 'all':
         user_data['delivery_fee_location'] = 'all'
-        return states.enter_delivery_fee_enter(_, bot, chat_id, msg_id, query.id)
+        return states.enter_delivery_fee_enter(_, bot, chat_id, msg_id=msg_id, query_id=query.id)
     elif action == 'select':
         page = 1
         user_data['listing_page'] = page
@@ -1668,6 +1691,7 @@ def on_delivery_fee_add(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_add_delivery_for_location(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1679,14 +1703,15 @@ def on_add_delivery_for_location(bot, update, user_data):
         return states.enter_delivery_fee_add(_, bot, chat_id, msg_id, query.id)
     elif action == 'select':
         user_data['delivery_fee_location'] = val
-        return states.enter_delivery_fee_enter(_, bot, chat_id, msg_id, query.id)
+        return states.enter_delivery_fee_enter(_, bot, chat_id, val, msg_id, query.id)
     elif action == 'page':
         page = int(val)
         user_data['listing_page'] = page
-        return states.enter_delivery_fee_location(_, bot, chat_id, page, msg_id, query.id)
+        return states.enter_delivery_fee_location(_, bot, chat_id, msg_id, query.id, page)
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_delivery_fee_enter(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -1699,7 +1724,7 @@ def on_delivery_fee_enter(bot, update, user_data):
                 return states.enter_delivery_fee_add(_, bot, chat_id, query.message.message_id, query.id)
             else:
                 page = user_data['listing_page']
-                return states.enter_delivery_fee_location(_, bot, chat_id, page, query.message.message_id, query.id)
+                return states.enter_delivery_fee_location(_, bot, chat_id, query.message.message_id, query.id, page)
         return states.enter_unknown_command(_, bot, query)
     delivery_text = update.message.text
     delivery_data = delivery_text.split('>')
@@ -1709,7 +1734,7 @@ def on_delivery_fee_enter(bot, update, user_data):
     except ValueError:
         msg = _('Incorrect format')
         bot.send_message(msg, chat_id)
-        return states.enter_delivery_fee_enter(_, bot, chat_id)
+        return states.enter_delivery_fee_enter(_, bot, chat_id, for_location)
     try:
         delivery_min = delivery_data[1]
     except IndexError:
@@ -1718,9 +1743,10 @@ def on_delivery_fee_enter(bot, update, user_data):
         delivery_min = int(delivery_min.strip())
     msg = _('Delivery fee was changed:')
     msg += '\n'
-    msg += _('Delivery fee: {}').format(delivery_fee)
+    currency_sym = get_currency_symbol()
+    msg += _('Delivery fee: `{}{}`').format(delivery_fee, currency_sym)
     msg += '\n'
-    msg += _('Delivery treshold: {}').format(delivery_min)
+    msg += _('Delivery treshold: `{}{}`').format(delivery_min, currency_sym)
     if for_location == 'all':
         config.set_value('delivery_fee', delivery_fee)
         config.set_value('delivery_min', delivery_min)
@@ -1728,18 +1754,19 @@ def on_delivery_fee_enter(bot, update, user_data):
             loc.delivery_fee = delivery_fee
             loc.delivery_min = delivery_min
             loc.save()
-        bot.send_message(chat_id, msg)
+        bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
         return states.enter_delivery_fee_add(_, bot, chat_id)
     else:
         loc = Location.get(id=for_location)
         loc.delivery_fee = delivery_fee
         loc.delivery_min = delivery_min
         loc.save()
-        bot.send_message(chat_id, msg)
+        bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
         page = user_data['listing_page']
         return states.enter_delivery_fee_location(_, bot, chat_id, page=page)
 
 
+@user_passes
 def on_admin_categories(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1770,6 +1797,7 @@ def on_admin_categories(bot, update, user_data):
         return enums.ADMIN_CATEGORY_REMOVE_SELECT
 
 
+@user_passes
 def on_admin_category_add(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1799,6 +1827,7 @@ def on_admin_category_add(bot, update, user_data):
     return enums.ADMIN_CATEGORIES
 
 
+@user_passes
 def on_admin_category_products_select(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1834,6 +1863,7 @@ def on_admin_category_products_select(bot, update, user_data):
         return enums.ADMIN_CATEGORY_PRODUCTS_ADD
 
 
+@user_passes
 def on_admin_category_remove(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -1873,6 +1903,7 @@ def on_admin_category_remove(bot, update, user_data):
     return enums.ADMIN_CATEGORIES
 
 
+@user_passes
 def on_admin_category_products_add(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -2319,6 +2350,9 @@ def on_product_edit_price_type(bot, update, user_data):
         prices_str = shortcuts.get_product_prices_str(_, product)
         bot.edit_message_text(prices_str, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN)
         msg = _('Enter new product prices\none per line in the format\n*COUNT PRICE*, e.g. *1 10*')
+        msg += '\n\n'
+        currency_str = '{} {}'.format(*Currencies.CURRENCIES[config.currency])
+        msg += _('Currency: {}').format(currency_str)
         bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_PRODUCT_EDIT_PRICES_TEXT
     elif action == 'select':
@@ -2648,6 +2682,9 @@ def on_add_product_prices(bot, update, user_data):
     action = query.data
     if action == 'text':
         msg = _('Enter new product prices\none per line in the format\n*COUNT PRICE*, e.g. *1 10*')
+        msg += '\n\n'
+        currency_str = '{} {}'.format(*Currencies.CURRENCIES[config.currency])
+        msg += _('Currency: {}').format(currency_str)
         keyboard = keyboards.cancel_button(_)
         bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
@@ -2845,9 +2882,12 @@ def on_locations_view(bot, update, user_data):
         msg = _('Location: `{}`').format(msg_title)
         msg += '\n'
         # currency here
-        msg += _('Delivery fee: `{}`').format(location.delivery_fee)
+        currency_sym = get_currency_symbol()
+        delivery_fee = location.delivery_fee if location.delivery_fee else config.delivery_fee
+        delivery_min = location.delivery_min if location.delivery_fee else config.delivery_min
+        msg += _('Delivery fee: `{}{}`').format(delivery_fee, currency_sym)
         msg += '\n'
-        msg += _('Delivery threshold: `{}`').format(location.delivery_min)
+        msg += _('Delivery threshold: `{}{}`').format(delivery_min, currency_sym)
         reply_markup = keyboards.location_detail_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_LOCATION_DETAIL
@@ -2916,6 +2956,7 @@ def on_cancel(update):
 
 def on_admin_fallback(bot, update):
     user_id = get_user_id(update)
+    _ = get_trans(user_id)
     update.message.reply_text(
         text=_('Unknown input, type /cancel to exit admin mode'),
         reply_markup=ReplyKeyboardRemove(), parse_mode=ParseMode.MARKDOWN,
@@ -3017,41 +3058,40 @@ def on_admin_enter_working_hours(bot, update, user_data):
 #     return enums.ADMIN_BOT_SETTINGS
 #
 #
-# def on_admin_add_discount(bot, update, user_data):
-#     user_id = get_user_id(update)
-#     _ = get_trans(user_id)
-#     if update.callback_query and update.callback_query.data == 'back':
-#         option_back_function(
-#             bot, update, keyboards.order_options_keyboard(_),
-#             _('💳 Order options'))
-#         return enums.ADMIN_ORDER_OPTIONS
-#     discount = update.message.text
-#     discount = parse_discount(discount)
-#     if discount:
-#         discount, discount_min = discount
-#         config_session = get_config_session()
-#         config_session['discount'] = discount
-#         config_session['discount_min'] = discount_min
-#         set_config_session(config_session)
-#         bot.send_message(chat_id=update.message.chat_id,
-#                          text=_('Discount was changed'),
-#                          reply_markup=keyboards.order_options_keyboard(_),
-#                          parse_mode=ParseMode.MARKDOWN)
-#         return enums.ADMIN_ORDER_OPTIONS
-#     else:
-#         msg = _('Invalid format')
-#         msg += '\n'
-#         msg += _('Enter discount like:\n'
-#                  '50 > 500: all deals above 500$ will be -50$\n'
-#                  '10% > 500: all deals above 500$ will be -10%\n'
-#                  'Current discount: {} > {}').format(config.get_discount(), config.get_discount_min())
-#         bot.send_message(update.message.chat_id,
-#                          msg, reply_markup=keyboards.cancel_button(_),
-#                          parse_mode=ParseMode.MARKDOWN)
-#         return enums.ADMIN_ADD_DISCOUNT
-#
-#
+@user_passes
+def on_admin_add_discount(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    if query:
+        if query.data == 'back':
+            return states.enter_order_options(_, bot, chat_id, query.message.message_id, query.id)
+        else:
+            return states.enter_unknown_command(_, bot, query)
+    discount = update.message.text
+    discount = parse_discount(discount)
+    if discount:
+        discount, discount_min = discount
+        config.set_value('discount', discount)
+        config.set_value('discount_min', discount_min)
+        msg = _('Discount was changed')
+        return states.enter_order_options(_, bot, chat_id, msg=msg)
+    else:
+        msg = _('Invalid format')
+        msg += '\n'
+        currency_str, currency_sym = Currencies.CURRENCIES[config.currency]
+        msg += _('Enter discount like:\n'
+                 '50 > 500: all deals above 500{0} will be -50{0}\n'
+                 '10% > 500: all deals above 500{0} will be -10%\n'
+                 '*Current discount: {1} > {2}*').format(currency_sym, config.discount, config.discount_min)
+        msg += '\n\n'
+        msg += _('Currency: {} {}').format(currency_str, currency_sym)
+        bot.send_message(chat_id, msg, reply_markup=keyboards.cancel_button(_), parse_mode=ParseMode.MARKDOWN)
+        return enums.ADMIN_ADD_DISCOUNT
 
+
+@user_passes
 def on_admin_bot_status(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -3253,7 +3293,7 @@ def on_admin_reset_confirm(bot, update, user_data):
                 pass
         delete_db()
         create_tables()
-        init_bot_tables()
+        shortcuts.init_bot_tables()
         msg = _('Database, session and all channel messages were deleted.')
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id, msg)
     elif action == 'no':
@@ -3267,6 +3307,7 @@ def on_admin_reset_confirm(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_admin_product_price_groups(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -3281,16 +3322,15 @@ def on_admin_product_price_groups(bot, update, user_data):
         query.answer()
         return enums.ADMIN_PRODUCT_PRICE_GROUP_CHANGE
     elif action == 'list':
-        groups = GroupProductCount.select(GroupProductCount.name, GroupProductCount.id).tuples()
-        keyboard = keyboards.general_select_one_keyboard(_, groups)
-        msg = _('Please select a price group:')
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard)
-        query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUP_LIST
-    else:
+        user_data['listing_page'] = 1
+        return states.enter_price_groups_list(_, bot, chat_id, msg_id, query.id)
+    elif action == 'back':
         return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
+    else:
+        states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_admin_product_price_groups_list(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -3298,41 +3338,22 @@ def on_admin_product_price_groups_list(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action, val = query.data.split('|')
     if action == 'select':
-        group = GroupProductCount.get(id=val)
-        product_counts = ProductCount.select(ProductCount.count, ProductCount.price)\
-            .where(ProductCount.product_group == group).tuples()
-        products = Product.select(Product.title).where(Product.group_price == group)
-        group_name = escape(group.name)
-        msg = _('Product price group:\n<i>{}</i>').format(group_name)
-        msg += '\n\n'
-        msg += _('Prices configured for this group:')
-        msg += '\n'
-        for count, price in product_counts:
-            msg += '{} x ${}\n'.format(count, price)
-        msg += '\n'
-        msg += _('Products in this group price:')
-        msg += '\n'
-        for p in products:
-            product_title = escape(p.title)
-            msg += '<i>{}</i>'.format(product_title)
-            msg += '\n'
-        keyboard = keyboards.create_product_price_group_selected_keyboard(_, group.id)
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.HTML)
-        return enums.ADMIN_PRODUCT_PRICE_GROUPS_SELECTED
+        return states.enter_price_group_selected(_, bot, chat_id, val, msg_id, query.id)
     elif action == 'page':
-        groups = GroupProductCount.select(GroupProductCount.name, GroupProductCount.id).tuples()
-        keyboard = keyboards.general_select_one_keyboard(_, groups, int(val))
-        msg = _('Please select a price group:')
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard)
-        query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUP_LIST
+        page = int(val)
+        user_data['listing_page'] = page
+        return states.enter_price_groups_list(_, bot, chat_id, msg_id, query.id, page=page)
     elif action == 'back':
+        del user_data['listing_page']
         msg = _('💸 Product price groups')
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_product_price_groups_keyboard(_))
         query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUPS
+        return enums.ADMIN_PRODUCT_PRICE_GROUP
+    else:
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
 def on_admin_product_price_group_selected(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -3346,50 +3367,93 @@ def on_admin_product_price_group_selected(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard)
         query.answer()
         return enums.ADMIN_PRODUCT_PRICE_GROUP_CHANGE
-    elif action == 'delete':
+    elif action == 'special_clients':
         group = GroupProductCount.get(id=val)
-        has_products = Product.select().where(Product.group_price == group).exists()
-        if has_products:
-            msg = _('Cannot delete group which has products, please remove price group from product')
-            query.answer(msg, show_alert=True)
-            return enums.ADMIN_PRODUCT_PRICE_GROUPS_SELECTED
+        msg = _('Please select special clients for group {}').format(group.name)
+        permissions = [
+            UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
+            UserPermission.VIP_CLIENT
+        ]
+        permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+        group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
+        group_perms = [group_perm.permission for group_perm in group_perms]
+        special_clients = []
+        selected_ids = []
+        for perm in permissions:
+            is_picked = perm in group_perms
+            special_clients.append((perm.get_permission_display(), perm.id, is_picked))
+            if is_picked:
+                selected_ids.append(perm.id)
+        user_data['admin_special_clients'] = {'selected_ids': selected_ids, 'group_id': group.id}
+        reply_markup = keyboards.general_select_keyboard(_, special_clients)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS
+    elif action in ('back', 'delete'):
+        if action == 'delete':
+            group = GroupProductCount.get(id=val)
+            has_products = Product.select().where(Product.group_price == group).exists()
+            if has_products:
+                msg = _('Cannot delete group which has products, please remove price group from product')
+                query.answer(msg, show_alert=True)
+                return enums.ADMIN_PRODUCT_PRICE_GROUP_SELECTED
+            else:
+                ProductCount.delete().where(ProductCount.product_group == group)
+                GroupProductCountPermission.delete().where(GroupProductCountPermission.price_group == group).execute()
+                group.delete_instance()
+                msg = _('Group was successfully deleted!')
         else:
-            ProductCount.delete().where(ProductCount.product_group == group)
-            group.delete_instance()
-            msg = _('Group was successfully deleted!')
-            keyboard = keyboards.create_product_price_groups_keyboard(_)
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard)
-            query.answer()
-            return enums.ADMIN_PRODUCT_PRICE_GROUPS
+            msg = None
+        page = user_data['listing_page']
+        return states.enter_price_groups_list(_, bot, chat_id, msg_id, query.id, msg, page)
     else:
-        if action == 'back':
-            msg = _('💸 Product price groups')
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_product_price_groups_keyboard(_))
-            query.answer()
-            return enums.ADMIN_PRODUCT_PRICE_GROUPS
-        group = GroupProductCount.get(id=val)
-        product_counts = ProductCount.select(ProductCount.count, ProductCount.price) \
-            .where(ProductCount.product_group == group).tuples()
-        products = Product.select(Product.title).where(Product.group_price == group)
-        group_name = escape(group.name)
-        msg = _('Product price group:\n<i>{}</i>').format(group_name)
-        msg += '\n\n'
-        msg += _('Prices configured for this group:')
-        msg += '\n'
-        for count, price in product_counts:
-            msg += 'x {} ${}\n'.format(count, price)
-        msg += '\n'
-        msg += _('Products in this group price:')
-        msg += '\n'
-        for p in products:
-            product_title = escape(p.title)
-            msg += '<i>{}</i>'.format(product_title)
-            msg += '\n'
-        keyboard = keyboards.create_product_price_group_selected_keyboard(_, group.id)
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.HTML)
-        return enums.ADMIN_PRODUCT_PRICE_GROUPS_SELECTED
+        return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
+def on_admin_product_price_group_clients(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'select':
+        group_id = user_data['admin_special_clients']['group_id']
+        group = GroupProductCount.get(id=group_id)
+        msg = _('Please select special clients for group {}').format(group.name)
+        permissions = [
+            UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
+            UserPermission.VIP_CLIENT
+        ]
+        permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+        selected_ids = user_data['admin_special_clients']['selected_ids']
+        val = int(val)
+        if val in selected_ids:
+            selected_ids.remove(val)
+        else:
+            selected_ids.append(val)
+        special_clients = []
+        for perm in permissions:
+            is_picked = perm.id in selected_ids
+            special_clients.append((perm.get_permission_display(), perm.id, is_picked))
+        reply_markup = keyboards.general_select_keyboard(_, special_clients)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS
+    elif action  in ('done', 'back'):
+        group_id = user_data['admin_special_clients']['group_id']
+        if action == 'done':
+            group = GroupProductCount.get(id=group_id)
+            GroupProductCountPermission.delete().where(GroupProductCountPermission.price_group == group).execute()
+            for perm_id in user_data['admin_special_clients']['selected_ids']:
+                perm = UserPermission.get(id=perm_id)
+                GroupProductCountPermission.create(permission=perm, price_group=group)
+        return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
+    else:
+        return states.enter_unknown_command(_, bot, query)
+
+
+@user_passes
 def on_admin_product_price_group_change(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -3399,30 +3463,36 @@ def on_admin_product_price_group_change(bot, update, user_data):
         msg = _('💸 Product price groups')
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_product_price_groups_keyboard(_))
         query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUPS
+        return enums.ADMIN_PRODUCT_PRICE_GROUP
     group_name = update.effective_message.text
     user_data['price_group']['name'] = group_name
     msg = _('Enter new product prices\none per line in the format\n*COUNT PRICE*, e.g. *1 10*')
+    msg += '\n\n'
+    currency_str = '{} {}'.format(*Currencies.CURRENCIES[config.currency])
+    msg += _('Currency: {}').format(currency_str)
     keyboard = keyboards.cancel_button(_)
     bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    return enums.ADMIN_PRODUCT_PRICE_GROUP_SAVE
+    return enums.ADMIN_PRODUCT_PRICE_GROUP_PRICES
 
 
-def on_admin_product_price_group_save(bot, update, user_data):
+@user_passes
+def on_admin_product_price_group_prices(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id = update.effective_chat.id
-    if update.callback_query and update.callback_query.data == 'back':
-        del user_data['price_group']
-        query = update.callback_query
-        msg_id = query.message.message_id
-        msg = _('💸 Product price groups')
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_product_price_groups_keyboard(_))
-        query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUPS
+    query = update.callback_query
+    if query:
+        if query.data == 'back':
+            del user_data['price_group']
+            query = update.callback_query
+            msg_id = query.message.message_id
+            msg = _('💸 Product price groups')
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_product_price_groups_keyboard(_))
+            query.answer()
+            return enums.ADMIN_PRODUCT_PRICE_GROUP
+        else:
+            return states.enter_unknown_command(_, bot, query)
     group_prices = update.effective_message.text
-    group_edit = user_data['price_group']['edit']
-    group_name = user_data['price_group']['name']
     prices = []
     for price_str in group_prices.split('\n'):
         try:
@@ -3439,26 +3509,87 @@ def on_admin_product_price_group_save(bot, update, user_data):
         msg = _('Incorrect prices entered!')
         bot.send_message(chat_id, msg)
         msg = _('Enter new product prices\none per line in the format\n*COUNT PRICE*, e.g. *1 10*')
+        msg += '\n\n'
+        currency_str = '{} {}'.format(*Currencies.CURRENCIES[config.currency])
+        msg += _('Currency: {}').format(currency_str)
         keyboard = keyboards.cancel_button(_)
         bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-        return enums.ADMIN_PRODUCT_PRICE_GROUP_SAVE
-    if group_edit:
-        group = GroupProductCount.get(id=group_edit)
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_PRICES
+    group_id = user_data['price_group']['edit']
+    if group_id:
+        group_name = user_data['price_group']['name']
+        group = GroupProductCount.get(id=group_id)
+        group.name = group_name
+        group.save()
         ProductCount.delete().where(ProductCount.product_group == group).execute()
+        for count, price in prices:
+            ProductCount.create(count=count, price=price, product_group=group)
+        group_name = escape(group_name)
+        msg = _('Group <i>{}</i>  was successfully changed!').format(group_name)
+        keyboard = keyboards.create_product_price_groups_keyboard(_)
+        bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+        return enums.ADMIN_PRODUCT_PRICE_GROUP
     else:
-        group = GroupProductCount()
-    group.name = group_name
-    group.save()
-    for count, price in prices:
-        ProductCount.create(count=count, price=price, product_group=group)
-    action_format = _('changed') if group_edit else _('added')
-    group_name = escape(group.name)
-    msg = _('Group <i>{}</i>  was successfully {}!').format(group_name, action_format)
-    keyboard = keyboards.create_product_price_groups_keyboard(_)
-    bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.HTML)
-    return enums.ADMIN_PRODUCT_PRICE_GROUPS
+        user_data['price_group']['group_prices'] = prices
+        msg = _('Please select special clients for group')
+        permissions = [
+            UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
+            UserPermission.VIP_CLIENT
+        ]
+        permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+        special_clients = [(perm.get_permission_display(), perm.id, False) for perm in permissions]
+        user_data['price_group']['selected_perms_ids'] = []
+        reply_markup = keyboards.general_select_keyboard(_, special_clients)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_NEW
 
 
+@user_passes
+def on_admin_product_price_group_clients_new(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'select':
+        msg = _('Please select special clients for group')
+        permissions = [
+            UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
+            UserPermission.VIP_CLIENT
+        ]
+        permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+        selected_ids = user_data['price_group']['selected_perms_ids']
+        val = int(val)
+        if val in selected_ids:
+            selected_ids.remove(val)
+        else:
+            selected_ids.append(val)
+        special_clients = [(perm.get_permission_display(), perm.id, perm.id in selected_ids) for perm in permissions]
+        reply_markup = keyboards.general_select_keyboard(_, special_clients)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_NEW
+    elif action == 'done':
+        group_data = user_data['price_group']
+        group_name = group_data['name']
+        group_prices = group_data['group_prices']
+        group_perms = group_data['selected_perms_ids']
+        group = GroupProductCount.create(name=group_name)
+        for count, price in group_prices:
+            ProductCount.create(count=count, price=price, product_group=group)
+        for perm_id in group_perms:
+            perm = UserPermission.get(id=perm_id)
+            GroupProductCountPermission.create(price_group=group, permission=perm)
+        group_name = escape(group_name)
+        msg = _('Group <i>{}</i>  was successfully added!').format(group_name)
+        keyboard = keyboards.create_product_price_groups_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+        return enums.ADMIN_PRODUCT_PRICE_GROUP
+    else:
+        return states.enter_unknown_command(_, bot, query)
+
+
+@user_passes
 def on_admin_btc_settings(bot, update):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -3509,6 +3640,7 @@ def on_admin_btc_settings(bot, update):
     return enums.ADMIN_BTC_PAYMENTS
 
 
+@user_passes
 def on_admin_btc_new_wallet_id(bot, update):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -3542,6 +3674,7 @@ def on_admin_btc_new_wallet_id(bot, update):
     return enums.ADMIN_BTC_PAYMENTS
 
 
+@user_passes
 def on_admin_btc_new_password(bot, update):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -3572,28 +3705,84 @@ def on_admin_btc_new_password(bot, update):
         bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
     return enums.ADMIN_BTC_PAYMENTS
 
-#
-# def on_admin_change_currency(bot, update):
-#     user_id = get_user_id(update)
-#     _ = get_trans(user_id)
-#     query = update.callback_query
-#     chat_id, msg_id = query.message.chat_id, query.message.message_id
-#     data = query.data
-#     if data in Currencies.CURRENCIES:
-#         session = get_config_session()
-#         session['currency'] = data
-#         set_config_session(session)
-#         msg = _('Currency was set to *{} {}*').format(*Currencies.CURRENCIES[data])
-#         keyboard = keyboards.create_currencies_keyboard(_)
-#         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-#         query.answer()
-#         return enums.ADMIN_SET_CURRENCIES
-#     else:
-#         msg = _('⚙ Bot settings')
-#         keyboard = keyboards.bot_settings_keyboard(_)
-#         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-#         query.answer()
-#         return enums.ADMIN_BOT_SETTINGS
+
+@user_passes
+def on_admin_change_currency(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    data = query.data
+    if data in Currencies.CURRENCIES:
+        CurrencyConverter().fetch_update_currencies()
+        rate = CurrencyRates.get(currency=data)
+        msg = _('When currency changed, all product prices, price groups, delivery fees and discount would be converted.')
+        msg += '\n'
+        msg += _('{} rate to {}: *{}*').format(Currencies.CURRENCIES[Currencies.DOLLAR][0], Currencies.CURRENCIES[data][0], rate.dollar_rate)
+        msg += '\n'
+        updated_str = config.currencies_last_updated.strftime('%H:%M %b %d')
+        msg += _('Rate was updated at: {}').format(updated_str)
+        msg += '\n'
+        msg += _('Are you sure?')
+        user_data['admin_currency_change'] = data
+        keyboard = keyboards.are_you_sure_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_SET_CURRENCIES_CONFIRM
+    elif data == 'back':
+        msg = _('⚙ Bot settings')
+        user = User.get(telegram_id=user_id)
+        keyboard = keyboards.bot_settings_keyboard(_, user)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_BOT_SETTINGS
+    else:
+        return states.enter_unknown_command(_, bot, query)
+
+
+@user_passes
+def on_admin_change_currency_confirm(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    if action in ('yes', 'no'):
+        if action == 'yes':
+            currency = user_data['admin_currency_change']
+            old_currency = config.currency
+            converter = CurrencyConverter()
+            converter.fetch_update_currencies()
+            for product_count in ProductCount.select():
+                price = product_count.price
+                new_price = converter.convert_currencies(price, old_currency, currency)
+                product_count.price = new_price
+                product_count.save()
+            for location in Location.select():
+                delivery_fee = converter.convert_currencies(location.delivery_fee, old_currency, currency)
+                delivery_min = converter.convert_currencies(location.delivery_min, old_currency, currency)
+                location.delivery_min = delivery_min
+                location.delivery_fee = delivery_fee
+                location.save()
+            delivery_fee = converter.convert_currencies(config.delivery_fee, old_currency, currency)
+            delivery_min = converter.convert_currencies(config.delivery_min, old_currency, currency)
+            config.set_value('delivery_fee', delivery_fee)
+            config.set_value('delivery_min', delivery_min)
+            config.set_value('currency', currency)
+            msg = _('Currency was set to *{} {}*').format(*Currencies.CURRENCIES[currency])
+        else:
+            del user_data['admin_currency_change']
+            currency = config.currency
+            currency_name, currency_symbol = Currencies.CURRENCIES[currency]
+            msg = _('Current currency: *{} {}*'.format(currency_name, currency_symbol))
+            msg += '\n'
+            msg += _('Select new currency:')
+        reply_markup = keyboards.create_currencies_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_SET_CURRENCIES
+    return states.enter_unknown_command(_, bot, query)
+
 #
 #
 # def on_start_btc_processing(bot, update):

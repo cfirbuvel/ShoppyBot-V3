@@ -3,14 +3,17 @@ from datetime import datetime
 
 from telegram.utils.helpers import escape_markdown
 
-from .helpers import get_trans, calculate_discount_total, config, Cart, quantize_btc, get_currency_symbol
+from .cart_helper import Cart
+from .helpers import get_trans, calculate_discount_total, config, quantize_btc, get_currency_symbol
 from .models import Location, Currencies, BtcStatus, OrderBtcPayment, BtcStage, WorkingHours, User
 from .btc_wrapper import CurrencyConverter
 
 
 def create_cart_details_msg(user_id, products_info):
     _ = get_trans(user_id)
-    currency = get_currency_symbol()
+    # currency = get_currency_symbol()
+    user = User.get(telegram_id=user_id)
+    currency_sym = Currencies.CURRENCIES[user.currency][1]
     msg = '▫️◾️◽️◼️◻️⬛️◻️◼️◽️◾️▫️'
     msg += '\n'
     msg += _('Products in cart:')
@@ -20,26 +23,25 @@ def create_cart_details_msg(user_id, products_info):
         title = escape_markdown(title)
         msg += '{}:'.format(title)
         msg += '\n'
-        msg += _('x {} = {}{}').format(count, price, currency)
+        msg += _('x {} = {}{}').format(count, price, currency_sym)
         msg += '\n\n'
         total += price
-    msg += _('Total: {}{}').format(total, currency)
+    msg += _('Total: {}{}').format(total, currency_sym)
     msg += '\n\n'
     msg += '▫️◾️◽️◼️◻️⬛️◻️◼️◽️◾️▫️'
     return msg
 
 
-def create_product_description(_, product_title, product_prices, product_count, subtotal):
+def create_product_description(_, currency, product_title, product_prices, product_count, subtotal):
     product_title = escape_markdown(product_title)
     text = _('Product:\n{}').format(product_title)
     text += '\n\n'
     text += '〰️'
     text += '\n'
-    conf_delivery_fee = config.delivery_fee
-    conf_delivery_min = config.delivery_min
 
-    currency = get_currency_symbol()
-
+    # currency = get_currency_symbol()
+    currency_sym = Currencies.CURRENCIES[currency][1]
+    CurrencyConverter.fetch_update_currencies()
     if Location.select().exists():
         locations_fees = defaultdict(list)
         for loc in Location.select():
@@ -49,6 +51,8 @@ def create_product_description(_, product_title, product_prices, product_count, 
             if not delivery_fee:
                 locations_fees[(0, 0)].append(loc_name)
                 continue
+            delivery_fee = CurrencyConverter.convert_currencies(delivery_fee, config.currency, currency)
+            delivery_min = CurrencyConverter.convert_currencies(delivery_min, config.currency, currency)
             locations_fees[(delivery_fee, delivery_min)].append(loc_name)
 
         locations_fees = [(key, value) for key, value in locations_fees.items()]
@@ -62,42 +66,53 @@ def create_product_description(_, product_title, product_prices, product_count, 
                 text += '{}'.format(', '.join(locs))
                 text += '\n\n'
             else:
-                text += _('*{}*{} Delivery Fee from:').format(delivery_fee, currency)
+                text += _('*{}*{} Delivery Fee from:').format(delivery_fee, currency_sym)
                 text += '\n'
                 text += '{}'.format(', '.join(locs))
                 if delivery_min > 0:
                     text += '\n'
-                    text += _('for orders below *{}*{}').format(delivery_min, currency)
+                    text += _('for orders below *{}*{}').format(delivery_min, currency_sym)
                 text += '\n\n'
     else:
+        conf_delivery_fee = config.delivery_fee
+        conf_delivery_min = config.delivery_min
         if conf_delivery_fee > 0:
+            conf_delivery_fee = CurrencyConverter.convert_currencies(conf_delivery_fee, config.currency, currency)
             if conf_delivery_fee > 0 and conf_delivery_min > 0:
-                text += _('*{}*{} Delivery Fee').format(conf_delivery_fee, currency)
+                conf_delivery_min = CurrencyConverter.convert_currencies(conf_delivery_min, config.currency, currency)
+                text += _('*{}*{} Delivery Fee').format(conf_delivery_fee, currency_sym)
                 text += '\n'
-                text += _('for orders below *{}*{}').format(conf_delivery_min, currency)
+                text += _('for orders below *{}*{}').format(conf_delivery_min, currency_sym)
                 text += '\n'
                 text += '〰️'
                 text += '\n'
             elif conf_delivery_fee > 0:
-                text += _('*{}*{} Delivery Fee').format(conf_delivery_fee, currency)
+                text += _('*{}*{} Delivery Fee').format(conf_delivery_fee, currency_sym)
                 text += '\n'
-            elif conf_delivery_fee == 0:
-                text += _('Free delivery')
+        else:
+            text += _('Free delivery')
     text += '\n\n'
     text += _('Price:')
     text += '\n'
 
     for q, price in product_prices:
+        price = CurrencyConverter.convert_currencies(price, config.currency, currency)
         text += '\n'
-        text += _('x {} = {}{}').format(q, price, currency)
+        text += _('x {} = {}{}').format(q, price, currency_sym)
 
     q = product_count
     if q > 0:
         text += '\n\n〰️\n\n'
         text += _('Count: {}').format(q)
         text += '\n'
-        text += _('Subtotal: {}{}').format(subtotal, currency)
+        subtotal = CurrencyConverter.convert_currencies(subtotal, config.currency, currency)
+        text += _('Subtotal: {}{}').format(subtotal, currency_sym)
         text += '\n'
+
+    datetime_format = '%H:%M %b %d'
+    currencies_updated = config.currencies_last_updated.strftime(datetime_format)
+    text += '\n'
+    text += _('Currency rate was updated at: {}').format(currencies_updated)
 
     return text
 
@@ -124,7 +139,9 @@ def create_confirmation_text(user_id, order_details, total, products_info):
     text += '\n'
 
     # change currency
-    currency = config.currency
+    # currency = config.currency
+    user = User.get(telegram_id=user_id)
+    currency = user.currency
     currency_symbol = Currencies.CURRENCIES[currency][1]
 
     for title, product_count, price in products_info:
@@ -136,7 +153,6 @@ def create_confirmation_text(user_id, order_details, total, products_info):
         text += '\n'
     text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
 
-    user = User.get(telegram_id=user_id)
     is_vip = user.is_vip_client
     delivery_method = order_details['delivery']
     btc_payment = order_details.get('btc_payment')
@@ -181,11 +197,12 @@ def create_confirmation_text(user_id, order_details, total, products_info):
     text += '\n'
     btc_value = None
     if btc_payment:
+        total = CurrencyConverter.convert_currencies(total, user.currency, currency)
         btc_info = CurrencyConverter().convert_to_btc(currency, total)
         if btc_info:
-            btc_value, last_updated = btc_info
+            btc_value = btc_info
             btc_value = quantize_btc(btc_value)
-            last_updated = last_updated.strftime('%H:%M')
+            last_updated = config.currencies_last_updated.strftime('%H:%M')
             text += '\n'
             text += _('Total in BTC:')
             text += '\n'
@@ -298,7 +315,7 @@ def create_service_notice(_, order, btc_data=None, for_courier=False):
         text += '\n'
     if order.location:
         text += _('From location: ')
-        text += escape_markdown(order.location)
+        text += escape_markdown(order.location.title)
         text += '\n'
     if order.address:
         text += _('Address: ')
@@ -360,14 +377,16 @@ def create_delivery_fee_msg(_, location=None):
         location_string = _(' for all locations')
         delivery_fee = config.delivery_fee
         delivery_min = config.delivery_min
-
-    res = _('Enter delivery fee like:\n'
-            '50 > 500: Deals below 500 will have delivery fee of 50\n'
+    currency_str, currency_sym = Currencies.CURRENCIES[config.currency]
+    msg = _('Enter delivery fee like:\n'
+            '50 > 500: Deals below 500{0} will have delivery fee of 50{0}\n'
             'or\n'
-            '50: All deals will have delivery fee of 50\n'
+            '50: All deals will have delivery fee of 50{0}\n'
             'Only works on delivery\n\n'
-            'Current fee{}: {}>{}').format(location_string, delivery_fee, delivery_min)
-    return res
+            'Current fee{1}: *{2} > {3}*').format(currency_sym, location_string, delivery_fee, delivery_min)
+    msg += '\n'
+    msg += _('Currency: {} {}').format(currency_str, currency_sym)
+    return msg
 
 
 def get_working_hours_msg(_):

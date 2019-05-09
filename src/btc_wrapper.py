@@ -171,73 +171,83 @@ def wallet_enable_hd(trans, wallet_id, password, second_password=None):
 
 class CurrencyConverter:
 
-    def __init__(self):
-        self.api_key = config.config.get(config.section, 'currencies_api_key')
+    # def __init__(self):
+    #     self.api_key = config.config.get(config.section, 'currencies_api_key')
 
-    def convert_to_btc(self, currency, value):
+    @staticmethod
+    def convert_to_btc(currency, value):
         res = None
-        last_rates = self.get_last_rates(currency)
+        last_rates = CurrencyConverter.get_last_rates(currency)
         if last_rates:
             res = quantize_btc(value * last_rates.btc_rate)
-        return res, last_rates.last_updated
+        return res
 
-    def convert_from_btc(self, currency, value):
+    @staticmethod
+    def convert_from_btc(currency, value):
         res = None
-        last_rates = self.get_last_rates(currency)
+        last_rates = CurrencyConverter.get_last_rates(currency)
         if last_rates:
             res = value / last_rates.btc_rate
             res = Decimal(res).quantize(Decimal('0.01'))
-        return res, last_rates.last_updated
+        return res
 
-    def get_last_rates(self, currency):
-        try:
-            last_rates = CurrencyRates.get(currency=currency)
-        except CurrencyRates.DoesNotExist:
-            self.fetch_update_currencies()
-            try:
-                last_rates = CurrencyRates.get(currency=currency)
-            except CurrencyRates.DoesNotExist:
-                return
-        else:
-            now = datetime.now()
-            diff = now - last_rates.last_updated
-            if diff.seconds / 3600 >= 1:
-                self.fetch_update_currencies()
-                last_rates = CurrencyRates.get(currency=currency)
+    @staticmethod
+    def get_last_rates(currency):
+        CurrencyConverter.fetch_update_currencies()
+        last_rates = CurrencyRates.get(currency)
         return last_rates
 
-    def fetch_update_currencies(self):
-        url = 'http://apilayer.net/api/live'
+    @staticmethod
+    def fetch_update_currencies():
+        last_updated = config.currencies_last_updated
+        if last_updated:
+            now = datetime.now()
+            diff = now - last_updated
+            diff_more = diff.seconds / 3600 >= 1
+        else:
+            diff_more = True
         currencies = list(Currencies.CURRENCIES.keys())
-        currencies.append('BTC')
-        currencies = ','.join(currencies)
-        params = {'access_key': self.api_key, 'currencies': currencies}
-        resp = requests.get(url, params=params)
-        if resp.status_code == 200:
-            quotes = resp.json()['quotes']
-            print(quotes)
-            btc_rate = quotes.pop('USDBTC')
-            btc_rate = Decimal(btc_rate)
-            for name, rate in quotes.items():
-                name = name.replace('USD', '', 1)
-                rate = quantize_btc(rate)
-                currency_btc_rate = btc_rate / rate
-                currency_btc_rate = quantize_btc(currency_btc_rate)
+        if diff_more:
+            api_key = config.currencies_api_key
+            url = 'http://apilayer.net/api/live'
+            currencies.append('BTC')
+            currencies = ','.join(currencies)
+            params = {'access_key': api_key, 'currencies': currencies}
+            resp = requests.get(url, params=params)
+            if resp.status_code == 200:
+                quotes = resp.json()['quotes']
+                btc_rate = quotes.pop('USDBTC')
+                btc_rate = Decimal(btc_rate)
+                for name, rate in quotes.items():
+                    name = name.replace('USD', '', 1)
+                    rate = quantize_btc(rate)
+                    currency_btc_rate = btc_rate / rate
+                    currency_btc_rate = quantize_btc(currency_btc_rate)
+                    try:
+                        currency = CurrencyRates.get(currency=name)
+                    except CurrencyRates.DoesNotExist:
+                        currency = CurrencyRates(currency=name)
+                    currency.btc_rate = currency_btc_rate
+                    currency.dollar_rate = rate
+                    currency.save()
                 now = datetime.now()
-                try:
-                    currency = CurrencyRates.get(currency=name)
-                except CurrencyRates.DoesNotExist:
-                    currency = CurrencyRates(currency=name)
-                currency.btc_rate = currency_btc_rate
-                currency.dollar_rate = rate
-                currency.last_updated = now
-                currency.save()
+                config.set_datetime_value('currencies_last_updated', now)
 
-    def convert_btc(self, usd_rate, btc_rate):
+    @staticmethod
+    def convert_currencies(amount, first_currency, second_currency):
+        CurrencyConverter.fetch_update_currencies()
+        first_currency = CurrencyRates.get(currency=first_currency)
+        second_currency = CurrencyRates.get(currency=second_currency)
+        dollar_amount = amount / first_currency.dollar_rate
+        result_amount = dollar_amount * second_currency.dollar_rate
+        result_amount = Decimal(result_amount).quantize(Decimal('0.01'))
+        return result_amount
+
+    @staticmethod
+    def convert_btc(usd_rate, btc_rate):
         rate = btc_rate / usd_rate
         rate = quantize_btc(rate)
         return rate
-
 
 
 

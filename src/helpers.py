@@ -1,4 +1,5 @@
 import configparser
+from configparser import NoOptionError
 import datetime
 import gettext
 import json
@@ -13,8 +14,9 @@ import redis
 
 from telegram import TelegramError
 
+# from .btc_wrapper import CurrencyConverter
 from .models import ProductCount, Product, User, OrderItem, Currencies, ConfigValue, UserPermission,\
-    BitcoinCredentials, Channel, ChannelPermissions
+    BitcoinCredentials, Channel, ChannelPermissions, CurrencyRates
 
 
 class JsonRedis(redis.StrictRedis):
@@ -70,7 +72,10 @@ class ConfigHelper:
         else:
             value = value.value
         if value is None:
-            value = self.config.get(self.section, name)
+            try:
+                value = self.config.get(self.section, name)
+            except NoOptionError:
+                return
         value = value.strip()
         if boolean:
             value = self.convert_to_bool(value)
@@ -90,6 +95,26 @@ class ConfigHelper:
         else:
             db_value.value = value
             db_value.save()
+
+    def get_datetime_value(self, name):
+        value = config.get_config_value(name)
+        if value:
+            format = '%Y-%m-%d %H-%M-%S'
+            value = datetime.datetime.strptime(value, format)
+            return value
+
+    def set_datetime_value(self, name, value):
+        format = '%Y-%m-%d %H-%M-%S'
+        value = value.strftime(format)
+        self.set_value(name, value)
+
+    @property
+    def currencies_api_key(self):
+        return self.get_config_value('currencies_api_key')
+
+    @property
+    def currencies_last_updated(self):
+        return self.get_datetime_value('currencies_last_updated')
 
     @property
     def api_token(self):
@@ -200,158 +225,6 @@ class ConfigHelper:
         return self.get_config_value('currency')
 
 
-class Cart:
-
-    @staticmethod
-    def check_cart(user_data):
-        # check that cart is still here in case we've restarted
-        cart = user_data.get('cart')
-        if cart is None:
-            cart = {}
-            user_data['cart'] = cart
-        return cart
-
-    @staticmethod
-    def add(user_data, product_id):
-        cart = Cart.check_cart(user_data)
-        product = Product.get(id=product_id)
-        if product.group_price:
-            query = (ProductCount.product_group == product.group_price)
-        else:
-            query = (ProductCount.product == product)
-        prices = ProductCount.select().where(query).order_by(ProductCount.count.asc())
-        counts = [x.count for x in prices]
-        if product_id not in cart:
-            cart[product_id] = counts[0]
-        else:
-            # add more
-            current_count = cart[product_id]
-            current_count_index = counts.index(current_count)
-            # iterate through possible product counts for next price
-            next_count_index = (current_count_index + 1) % len(counts)
-            cart[product_id] = counts[next_count_index]
-        user_data['cart'] = cart
-        return user_data
-
-    @staticmethod
-    def remove(user_data, product_id):
-        cart = Cart.check_cart(user_data)
-        product_id = product_id
-        product = Product.get(id=product_id)
-        if product.group_price:
-            query = (ProductCount.product_group == product.group_price)
-        else:
-            query = (ProductCount.product == product)
-        prices = ProductCount.select().where(query).order_by(ProductCount.count.asc())
-        counts = [x.count for x in prices]
-
-        if product_id in cart:
-            current_count = cart[product_id]
-            current_count_index = counts.index(current_count)
-
-            if current_count_index == 0:
-                del cart[product_id]
-            else:
-                next_count_index = current_count_index - 1
-                cart[product_id] = counts[next_count_index]
-        user_data['cart'] = cart
-
-        return user_data
-
-    @staticmethod
-    def remove_all(user_data, product_id):
-        cart = Cart.check_cart(user_data)
-        try:
-            del cart[product_id]
-        except KeyError:
-            pass
-        user_data['cart'] = cart
-        return user_data
-
-    @staticmethod
-    def get_products_info(user_data, for_order=False):
-        product_ids = Cart.get_product_ids(user_data)
-
-        group_prices = defaultdict(int)
-        products = Product.select().where(Product.id << list(product_ids))
-        products_counts = []
-        for product in products:
-            count = Cart.get_product_count(user_data, product.id)
-            group_price = product.group_price
-            if group_price:
-                group_prices[group_price.id] += count
-            products_counts.append((product, count))
-
-        for group_id, count in group_prices.items():
-            group_count = ProductCount.select().where(
-                ProductCount.product_group == group_id, ProductCount.count <= count
-            ).order_by(ProductCount.count.desc()).first()
-            price_per_one = group_count.price / group_count.count
-            group_prices[group_id] = price_per_one
-
-        products_info = []
-        for product, count in products_counts:
-            group_price = product.group_price
-            if group_price:
-                product_price = count * group_prices[group_price.id]
-                product_price = Decimal(product_price).quantize(Decimal('0.01'))
-            else:
-                product_price = ProductCount.get(product=product, count=count).price
-            if for_order:
-                name = product.id
-            else:
-                name = product.title
-            products_info.append((name, count, product_price))
-        return products_info
-
-    @staticmethod
-    def get_product_ids(user_data):
-        cart = Cart.check_cart(user_data)
-        return cart.keys()
-
-    @staticmethod
-    def get_product_count(user_data, product_id):
-        cart = Cart.check_cart(user_data)
-        if product_id not in cart:
-            return 0
-        else:
-            return cart[product_id]
-
-    @staticmethod
-    def not_empty(user_data):
-        cart = Cart.check_cart(user_data)
-        return len(cart) > 0
-
-    @staticmethod
-    def get_product_subtotal(user_data, product_id):
-        count = Cart.get_product_count(user_data, product_id)
-        product = Product.get(id=product_id)
-        if product.group_price:
-            subquery = {'product_group': product.group_price}
-            # subquery = (ProductCount.product_group == product.group_price)
-        else:
-            subquery = {'product': product}
-        try:
-            product_count = ProductCount.get(count=count, **subquery)
-        except ProductCount.DoesNotExist:
-            price = 0
-        else:
-            price = product_count.price
-        return price
-
-    @staticmethod
-    def get_cart_total(user_data):
-        products_info = Cart.get_products_info(user_data)
-        total = sum((val[-1] for val in products_info))
-        return total
-
-    @staticmethod
-    def fill_order(user_data, order):
-        products = Cart.get_products_info(user_data, for_order=True)
-        for p_id, p_count, p_price in products:
-            OrderItem.create(order=order, product_id=p_id, count=p_count, total_price=p_price)
-
-
 def parse_discount(discount_str):
     discount_list = [v.strip() for v in discount_str.split('>')]
     if len(discount_list) == 2:
@@ -437,6 +310,7 @@ def get_trans(user_id):
 
 def get_channel_trans():
     locale = config.channels_language
+    print(locale)
     return gettext.gettext if locale == 'en' else cat.gettext
 
 
@@ -465,51 +339,6 @@ def get_user_update_username(user_id, username):
         user.username = username
         user.save()
     return user
-
-
-def init_bot_tables():
-    for perm, _ in UserPermission.PERMISSIONS:
-        try:
-            UserPermission.get(permission=perm)
-        except UserPermission.DoesNotExist:
-            UserPermission.create(permission=perm)
-
-    owner_id = config.owner_id
-    if owner_id is None:
-        raise AssertionError('Please set Owner ID in config file before starting the bot.')
-    try:
-        User.get(telegram_id=owner_id)
-    except User.DoesNotExist:
-        owner_perm = UserPermission.get(permission=UserPermission.OWNER)
-        User.create(telegram_id=owner_id, permission=owner_perm)
-
-    btc_creds = BitcoinCredentials.select().first()
-    if not btc_creds:
-        BitcoinCredentials.create()
-
-    channels_map = {
-        'reviews_channel': {'name': 'Reviews channel', 'perms': (1, 2, 3, 4, 5, 6, 7, 8)},
-        'service_channel': {'name': 'Service channel', 'perms': (1, 2)},
-        'customers_channel': {'name': 'Customers channel', 'perms': (1, 2, 4, 5, 6, 7, 8)},
-        'vip_customers_channel': {'name': 'Vip customers channel', 'perms': (1, 2, 7)},
-        'couriers_channel': {'name': 'Couriers channel', 'perms': (1, 2, 3)}
-    }
-    for conf_name, data in channels_map.items():
-        try:
-            Channel.get(conf_name=conf_name)
-        except Channel.DoesNotExist:
-            name = data['name']
-            perms = data['perms']
-            conf_id = conf_name + '_id'
-            conf_link = conf_name + '_link'
-            channel_id = config.get_config_value(conf_id)
-            channel_link = config.get_config_value(conf_link)
-            if not channel_link or not channel_id:
-                raise AssertionError('Please specify both "{}" and "{}" config values'.format(conf_id, conf_link))
-            channel = Channel.create(name=name, channel_id=channel_id, link=channel_link, conf_name=conf_name)
-            for val in perms:
-                perm = UserPermission.get(permission=val)
-                ChannelPermissions.create(channel=channel, permission=perm)
 
 
 def clear_user_data(user_data, *args):

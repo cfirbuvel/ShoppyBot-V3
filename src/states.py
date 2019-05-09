@@ -3,15 +3,15 @@ from datetime import datetime
 from decimal import Decimal
 from telegram import ParseMode, ReplyKeyboardRemove
 from telegram.ext import ConversationHandler
-from telegram.utils.helpers import escape_markdown
+from telegram.utils.helpers import escape_markdown, escape
 
 
 from . import keyboards, messages, enums, shortcuts
-# from .admin import is_admin
+from .cart_helper import Cart
 from .models import Location, User, OrderBtcPayment, Channel, IdentificationStage, UserPermission, CourierLocation, \
-    Product, WorkingHours
-from .helpers import Cart, config, get_user_id, get_trans, is_vip_customer, is_admin, get_username, \
-    get_user_update_username, logger
+    Product, WorkingHours, GroupProductCount, ProductCount, GroupProductCountPermission
+from .helpers import config, get_user_id, get_trans, is_vip_customer, is_admin, get_username, \
+    get_user_update_username, logger, get_currency_symbol
 from .btc_settings import BtcSettings
 
 
@@ -32,7 +32,7 @@ def enter_menu(bot, update, user_data, msg_id=None, query_id=None):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     user = User.get(telegram_id=user_id)
-    products_info = Cart.get_products_info(user_data)
+    products_info = Cart.get_products_info(user_data, user.currency)
     if products_info:
         msg = messages.create_cart_details_msg(user_id, products_info)
     else:
@@ -174,7 +174,8 @@ def enter_pending_registrations_user(_, bot, chat_id, msg_id, query_id, user_dat
 def enter_black_list(_, bot, chat_id, msg_id, query_id, page=1, msg=None):
     if not msg:
         msg = _('🔒 Black-list')
-    users = User.select(User.username, User.id).where(User.banned == True).tuples()
+    users = User.select(User.username, User.id).join(UserPermission)\
+        .where(User.banned == True, UserPermission.permission != UserPermission.OWNER).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, users, page_num=page)
     bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     bot.answer_callback_query(query_id)
@@ -203,11 +204,16 @@ def enter_courier_detail(_, bot, chat_id, msg_id, query_id, courier_id):
     return enums.ADMIN_COURIER_DETAIL
 
 
-def enter_order_options(_, bot, chat_id, msg_id, query_id):
-    msg = _('💳 Order options')
+def enter_order_options(_, bot, chat_id, msg_id=None, query_id=None, msg=None):
+    if not msg:
+        msg = _('💳 Order options')
     reply_markup = keyboards.order_options_keyboard(_)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
-    bot.answer_callback_query(query_id)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    if query_id:
+        bot.answer_callback_query(query_id)
     return enums.ADMIN_ORDER_OPTIONS
 
 
@@ -308,26 +314,31 @@ def enter_delivery_fee_add(_, bot, chat_id, msg_id=None, query_id=None):
     return enums.ADMIN_DELIVERY_FEE_ADD
 
 
-def enter_delivery_fee_enter(_, bot, chat_id, msg_id=None, query_id=None):
-    msg = messages.create_delivery_fee_msg(_)
+def enter_delivery_fee_enter(_, bot, chat_id, location_id=None, msg_id=None, query_id=None):
+    if location_id:
+        location = Location.get(id=location_id)
+    else:
+        location = None
+    msg = messages.create_delivery_fee_msg(_, location)
     reply_markup = keyboards.cancel_button(_)
     if msg_id:
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         bot.answer_callback_query(query_id)
     else:
-        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     return enums.ADMIN_DELIVERY_FEE_ENTER
 
 
-def enter_delivery_fee_location(_, bot, chat_id, page, msg_id=None, query_id=None):
+def enter_delivery_fee_location(_, bot, chat_id, msg_id=None, query_id=None, page=None):
     msg = _('Select location:')
     locations = Location.select(Location.title, Location.id).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, locations, page_num=page)
     if msg_id:
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
-        bot.answer_callback_query(query_id)
     else:
         bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    if query_id:
+        bot.answer_callback_query(query_id)
     return enums.ADMIN_DELIVERY_FEE_LOCATION
 
 
@@ -391,7 +402,7 @@ def enter_order_locations(_, bot, chat_id, action, msg_id=None, query_id=None, p
         msg = _('Please select location to pickup')
     else:
         msg = _('Please select courier location')
-    locations = Location.select(Location.title, Location.id)
+    locations = Location.select(Location.title, Location.id).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, locations, page_num, cancel=True)
     if msg_id:
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
@@ -509,8 +520,9 @@ def enter_btc_too_low(_, bot, chat_id, msg_id=None, query_id=None):
 
 
 def enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id=None, query_id=None):
-    total = Cart.get_cart_total(user_data)
-    products_info = Cart.get_products_info(user_data)
+    user = User.get(telegram_id=user_id)
+    total = Cart.get_cart_total(user_data, user.currency)
+    products_info = Cart.get_products_info(user_data, user.currency)
     order_details = user_data['order_details']
     btc_payment = order_details.get('btc_payment')
     text, btc_value = messages.create_confirmation_text(user_id, order_details, total, products_info)
@@ -530,3 +542,49 @@ def enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id=None, q
     return enums.BOT_ORDER_CONFIRMATION
 
 
+def enter_price_groups_list(_, bot, chat_id, msg_id, query_id, msg=None, page=1):
+    groups = GroupProductCount.select(GroupProductCount.name, GroupProductCount.id).tuples()
+    keyboard = keyboards.general_select_one_keyboard(_, groups, page_num=page)
+    if not msg:
+        msg = _('Please select a price group:')
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard)
+    bot.answer_callback_query(query_id)
+    return enums.ADMIN_PRODUCT_PRICE_GROUP_LIST
+
+
+def enter_price_group_selected(_, bot, chat_id, group_id, msg_id=None, query_id=None):
+    group = GroupProductCount.get(id=group_id)
+    product_counts = ProductCount.select(ProductCount.count, ProductCount.price) \
+        .where(ProductCount.product_group == group).tuples()
+    products = Product.select(Product.title).where(Product.group_price == group)
+    group_name = escape(group.name)
+    msg = _('Product price group:\n<i>{}</i>').format(group_name)
+    msg += '\n\n'
+    msg += _('Prices configured for this group:')
+    msg += '\n'
+    currency_sym = get_currency_symbol()
+    for count, price in product_counts:
+        msg += '{} x {}{}\n'.format(count, price, currency_sym)
+    msg += '\n'
+    msg += _('Products in this group price:')
+    msg += '\n'
+    for p in products:
+        product_title = escape(p.title)
+        msg += '<i>{}</i>'.format(product_title)
+        msg += '\n'
+    msg += '\n'
+    msg += _('Special clients:')
+    msg += '\n'
+    permissions = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
+    if len(permissions):
+        msg += ', '.join(group_perm.permission.get_permission_display() for group_perm in permissions)
+    else:
+        msg += 'All clients'
+    keyboard = keyboards.create_product_price_group_selected_keyboard(_, group.id)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    if query_id:
+        bot.answer_callback_query(query_id)
+    return enums.ADMIN_PRODUCT_PRICE_GROUP_SELECTED

@@ -1,8 +1,10 @@
 import gettext
+import os
 from functools import wraps
 
 from telegram.ext import ConversationHandler
 # from .enums import BOT_INIT
+from .keyboards import start_btn
 from .helpers import get_user_id, get_locale, config, cat, get_username
 from .models import User, UserPermission
 
@@ -27,10 +29,17 @@ def user_passes(func):
                 user.username = username
                 user.save()
         _ = gettext.gettext if locale == 'en' else cat.gettext
+        query = update.callback_query
+        if query:
+            bot.answer_callback_query(query.id)
         if not username:
             caption = _('Please create username to continue using bot')
-            with open(config.username_gif, 'rb') as animation:
-                bot.send_animation(chat_id, animation, caption=caption)
+            reply_markup = start_btn(_)
+            if os.path.isfile(config.username_gif):
+                with open(config.username_gif, 'rb') as animation:
+                    bot.send_animation(chat_id, animation, caption=caption, reply_markup=reply_markup)
+            else:
+                bot.send_animation(chat_id, config.username_gif, caption=caption, reply_markup=reply_markup)
             return ConversationHandler.END
         if user.banned:
             passes_test = False
@@ -44,10 +53,13 @@ def user_passes(func):
         if passes_test:
             return func(bot, update, user_data)
         chat_id = update.effective_chat.id
-        query = update.callback_query
         if query:
             bot.edit_message_text(msg, chat_id, query.message.message_id)
         else:
             bot.send_message(chat_id, msg)
         return ConversationHandler.END
     return wrapper
+
+
+def user_permissions():
+    pass

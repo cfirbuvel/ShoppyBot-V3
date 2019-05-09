@@ -2,12 +2,10 @@
 from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandler, Filters, MessageHandler, Updater, \
     Handler
 
-from src import admin_handlers
-from src import enums
-from src import handlers
-from src.helpers import config, get_user_id, get_channel_trans, init_bot_tables
+from src import admin_handlers, courier_handlers, handlers, enums, shortcuts
+from src.helpers import config, get_user_id, get_channel_trans
 
-# from src.shortcuts import resend_responsibility_keyboard, make_confirm, make_unconfirm
+# from src.shortcuts import on_drop_order, make_confirm, make_unconfirm
 
 from src.models import create_tables, close_db
 from src.btc_wrapper import wallet_enable_hd
@@ -27,55 +25,46 @@ def error_callback(bot, update, error):
 
 
 def main():
-    # courier_conversation_handler = ConversationHandler(
-    #     entry_points=[
-    #         CallbackQueryHandler(handlers.on_courier_action_to_confirm,
-    #                              pattern='^confirm_courier', pass_user_data=True
-    #                              ),
-    #         CallbackQueryHandler(handlers.on_courier_ping_choice,
-    #                              pattern='^ping', pass_user_data=True),
-    #         CallbackQueryHandler(handlers.on_admin_drop_order, pattern='^admin_dropped'),
-    #         CallbackQueryHandler(resend_responsibility_keyboard,
-    #                              pattern='^dropped',
-    #                              )
-    #     ],
-    #     states={
-    #         enums.COURIER_STATE_INIT: [
-    #             CallbackQueryHandler(handlers.on_courier_action_to_confirm,
-    #                                  pattern='^confirm_courier', pass_user_data=True
-    #                                  ),
-    #             CallbackQueryHandler(handlers.on_courier_ping_choice,
-    #                                  pattern='^ping', pass_user_data=True),
-    #             CallbackQueryHandler(handlers.on_admin_drop_order, pattern='^admin_dropped'),
-    #             CallbackQueryHandler(resend_responsibility_keyboard,
-    #                                  pattern='^dropped',
-    #                                  )
-    #         ],
-    #         enums.COURIER_STATE_PING: [
-    #             CallbackQueryHandler(handlers.on_courier_ping_client, pass_user_data=True)
-    #         ],
-    #         enums.COURIER_STATE_PING_SOON: [
-    #             CallbackQueryHandler(handlers.on_courier_ping_client_soon, pass_user_data=True),
-    #             MessageHandler(Filters.text, handlers.on_courier_ping_client_soon, pass_user_data=True)
-    #         ],
-    #         enums.COURIER_STATE_CONFIRM_ORDER: [
-    #             CallbackQueryHandler(handlers.on_courier_confirm_order, pass_user_data=True)
-    #         ],
-    #         enums.COURIER_STATE_CONFIRM_REPORT: [
-    #             CallbackQueryHandler(handlers.on_courier_confirm_report,)
-    #         ],
-    #         enums.COURIER_STATE_REPORT_REASON: [
-    #             MessageHandler(Filters.text, handlers.on_courier_enter_reason),
-    #             CallbackQueryHandler(handlers.on_courier_cancel_reason, pattern='^back')
-    #         ]
-    #     },
-    #     fallbacks=[
-    #         CommandHandler('start', handlers.on_start, pass_user_data=True)
-    #     ]
-    # )
+    courier_conversation_handler = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(courier_handlers.on_courier_action_to_confirm, pattern='^confirm_courier', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_courier_ping_choice, pattern='^ping', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_admin_drop_order, pattern='^admin_dropped', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^dropped', pass_user_data=True)
+        ],
+        states={
+            enums.COURIER_STATE_INIT: [
+                CallbackQueryHandler(courier_handlers.on_courier_action_to_confirm, pattern='^confirm_courier', pass_user_data=True),
+                CallbackQueryHandler(courier_handlers.on_courier_ping_choice, pattern='^ping', pass_user_data=True),
+                CallbackQueryHandler(courier_handlers.on_admin_drop_order, pattern='^admin_dropped', pass_user_data=True),
+                CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^dropped', pass_user_data=True)
+            ],
+            enums.COURIER_STATE_PING: [
+                CallbackQueryHandler(courier_handlers.on_courier_ping_client, pass_user_data=True)
+            ],
+            enums.COURIER_STATE_PING_SOON: [
+                CallbackQueryHandler(courier_handlers.on_courier_ping_client_soon, pass_user_data=True),
+                MessageHandler(Filters.text, courier_handlers.on_courier_ping_client_soon, pass_user_data=True)
+            ],
+            enums.COURIER_STATE_CONFIRM_ORDER: [
+                CallbackQueryHandler(courier_handlers.on_courier_confirm_order, pass_user_data=True)
+            ],
+            enums.COURIER_STATE_CONFIRM_REPORT: [
+                CallbackQueryHandler(courier_handlers.on_courier_confirm_report, pass_user_data=True)
+            ],
+            enums.COURIER_STATE_REPORT_REASON: [
+                MessageHandler(Filters.text, courier_handlers.on_courier_enter_reason, pass_user_data=True),
+                CallbackQueryHandler(courier_handlers.on_courier_cancel_reason, pattern='^back', pass_user_data=True)
+            ]
+        },
+        fallbacks=[
+            CommandHandler('start', handlers.on_start, pass_user_data=True)
+        ]
+    )
     user_conversation_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', handlers.on_start, pass_user_data=True),
+            CallbackQueryHandler(handlers.on_start, pattern='^start_bot', pass_user_data=True),
             CallbackQueryHandler(handlers.on_menu, pattern='^(menu|product)', pass_user_data=True)
         ],
         states={
@@ -147,14 +136,17 @@ def main():
                 CallbackQueryHandler(handlers.on_bot_language_change,
                                      pass_user_data=True),
             ],
+            enums.BOT_CURRENCY_CHANGE: [
+                CallbackQueryHandler(handlers.on_bot_currency_change, pass_user_data=True)
+            ],
             enums.BOT_MY_ORDERS: [
                 CallbackQueryHandler(handlers.on_menu, pattern='product', pass_user_data=True),
                 CallbackQueryHandler(handlers.on_my_orders, pass_user_data=True)
             ],
-            # enums.BOT_MY_ORDERS_DATE: [
-            #     CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
-            #     CallbackQueryHandler(handlers.on_my_order_date, pass_user_data=True)
-            # ],
+            enums.BOT_MY_ORDERS_DATE: [
+                CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
+                CallbackQueryHandler(handlers.on_my_order_date, pass_user_data=True)
+            ],
             enums.BOT_MY_LAST_ORDER: [
                 CallbackQueryHandler(handlers.on_my_last_order, pass_user_data=True)
             ],
@@ -255,13 +247,13 @@ def main():
             enums.ADMIN_ORDERS_PENDING_SELECT: [
                 CallbackQueryHandler(admin_handlers.on_admin_orders_pending_select, pass_user_data=True)
             ],
-            # enums.ADMIN_ORDERS_FINISHED_DATE: [
-            #     CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
-            #     CallbackQueryHandler(admin_handlers.on_admin_orders_finished_date, pass_user_data=True)
-            # ],
-            # enums.ADMIN_ORDERS_FINISHED_SELECT: [
-            #     CallbackQueryHandler(admin_handlers.on_admin_orders_finished_select, pass_user_data=True)
-            # ],
+            enums.ADMIN_ORDERS_FINISHED_DATE: [
+                CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
+                CallbackQueryHandler(admin_handlers.on_admin_orders_finished_date, pass_user_data=True)
+            ],
+            enums.ADMIN_ORDERS_FINISHED_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_admin_orders_finished_select, pass_user_data=True)
+            ],
             enums.ADMIN_PRODUCTS: [
                 CallbackQueryHandler(admin_handlers.on_products, pattern='^bot_products', pass_user_data=True)
             ],
@@ -368,7 +360,7 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_channels, pattern='^bot_channels', pass_user_data=True)
             ],
             enums.ADMIN_CHANNELS_LANGUAGE: [
-                CallbackQueryHandler(admin_handlers.on_channels_language)
+                CallbackQueryHandler(admin_handlers.on_channels_language, pass_user_data=True)
             ],
             enums.ADMIN_CHANNELS_VIEW: [
                 CallbackQueryHandler(admin_handlers.on_channels_view, pass_user_data=True)
@@ -455,13 +447,11 @@ def main():
                 CallbackQueryHandler(
                     admin_handlers.on_admin_order_options, pattern='^bot_order_options', pass_user_data=True)
             ],
-            # enums.ADMIN_ADD_DISCOUNT: [
-            #     CallbackQueryHandler(
-            #         admin_handlers.on_admin_add_discount, pass_user_data=True),
-            #     MessageHandler(Filters.text, admin_handlers.on_admin_add_discount,
-            #                    pass_user_data=True),
-            #     CommandHandler('cancel', admin_handlers.on_cancel),
-            # ],
+            enums.ADMIN_ADD_DISCOUNT: [
+                CallbackQueryHandler(admin_handlers.on_admin_add_discount, pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_admin_add_discount,
+                               pass_user_data=True),
+            ],
             enums.ADMIN_EDIT_IDENTIFICATION_STAGES: [
                 CallbackQueryHandler(admin_handlers.on_admin_edit_identification_stages, pass_user_data=True)
             ],
@@ -502,22 +492,28 @@ def main():
             enums.ADMIN_RESET_CONFIRM: [
                 CallbackQueryHandler(admin_handlers.on_admin_reset_confirm, pass_user_data=True)
             ],
-            enums.ADMIN_PRODUCT_PRICE_GROUPS: [
+            enums.ADMIN_PRODUCT_PRICE_GROUP: [
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_groups, pass_user_data=True)
             ],
             enums.ADMIN_PRODUCT_PRICE_GROUP_LIST: [
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_groups_list, pass_user_data=True)
             ],
-            enums.ADMIN_PRODUCT_PRICE_GROUPS_SELECTED: [
+            enums.ADMIN_PRODUCT_PRICE_GROUP_SELECTED: [
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_group_selected, pass_user_data=True)
+            ],
+            enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS: [
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients, pass_user_data=True)
             ],
             enums.ADMIN_PRODUCT_PRICE_GROUP_CHANGE: [
                 MessageHandler(Filters.text, admin_handlers.on_admin_product_price_group_change, pass_user_data=True),
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_group_change, pass_user_data=True)
             ],
-            enums.ADMIN_PRODUCT_PRICE_GROUP_SAVE: [
-                MessageHandler(Filters.text, admin_handlers.on_admin_product_price_group_save, pass_user_data=True),
-                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_save, pass_user_data=True)
+            enums.ADMIN_PRODUCT_PRICE_GROUP_PRICES: [
+                MessageHandler(Filters.text, admin_handlers.on_admin_product_price_group_prices, pass_user_data=True),
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_prices, pass_user_data=True)
+            ],
+            enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_NEW: [
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients_new, pass_user_data=True)
             ],
             enums.ADMIN_BTC_PAYMENTS: [
                 CallbackQueryHandler(admin_handlers.on_admin_btc_settings)
@@ -530,12 +526,16 @@ def main():
                 MessageHandler(Filters.text, admin_handlers.on_admin_btc_new_password),
                 CallbackQueryHandler(admin_handlers.on_admin_btc_new_password)
             ],
-            # enums.ADMIN_SET_CURRENCIES: [
-            #     CallbackQueryHandler(admin_handlers.on_admin_change_currency)
-            # ]
+            enums.ADMIN_SET_CURRENCIES: [
+                CallbackQueryHandler(admin_handlers.on_admin_change_currency, pass_user_data=True)
+            ],
+            enums.ADMIN_SET_CURRENCIES_CONFIRM: [
+                CallbackQueryHandler(admin_handlers.on_admin_change_currency_confirm, pass_user_data=True)
+            ],
         },
         fallbacks=[
             # CommandHandler('cancel', handlers.on_cancel, pass_user_data=True),
+            CallbackQueryHandler(handlers.on_start, pattern='^start_bot',  pass_user_data=True),
             CommandHandler('start', handlers.on_start, pass_user_data=True)
         ])
     updater = Updater(config.api_token, user_sig_handler=close_db_on_signal, workers=12)
@@ -545,7 +545,7 @@ def main():
     # updater.dispatcher.add_handler(MessageHandler(
     #     Filters.status_update.new_chat_members, handlers.send_welcome_message))
     updater.dispatcher.add_handler(user_conversation_handler)
-    # updater.dispatcher.add_handler(courier_conversation_handler)
+    updater.dispatcher.add_handler(courier_conversation_handler)
     updater.dispatcher.add_handler(
         CallbackQueryHandler(handlers.service_channel_courier_query_handler,
                              pattern='^courier',
@@ -576,6 +576,6 @@ def main():
 
 if __name__ == '__main__':
     create_tables()
-    init_bot_tables()
+    shortcuts.init_bot_tables()
     wallet_enable_hd(get_channel_trans(), BtcSettings.WALLET, BtcSettings.PASSWORD, BtcSettings.SECOND_PASSWORD)
     main()
