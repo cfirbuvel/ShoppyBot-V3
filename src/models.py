@@ -45,14 +45,15 @@ class WorkingHours(BaseModel):
     SAT = 5
     SUN = 6
     DAYS = [
-        (MON, _('Monday')), (TUE, _('Tuesday')), (WED, _('Wednesday')), (THU, _('Thurdsay')),
-        (FRI, _('Friday')), (SAT, _('Saturday')), (SUN, _('Sunday'))
+        (SUN, _('Sunday')), (MON, _('Monday')), (TUE, _('Tuesday')), (WED, _('Wednesday')), (THU, _('Thurdsay')),
+        (FRI, _('Friday')), (SAT, _('Saturday'))
     ]
     day = IntegerField(choices=DAYS)
     open_time = TimeField()
     close_time = TimeField()
 
     def get_day_display(self):
+        print(dict(self.DAYS))
         return dict(self.DAYS)[self.day]
 
 
@@ -219,6 +220,7 @@ class Order(BaseModel):
     total_cost = DecimalField(default=0)
     btc_payment = BooleanField(default=False)
     coordinates = CharField(null=True)
+    delivery_fee = DecimalField(default=0)
 
     # refactor this?
     order_hidden_text = TextField(default='')
@@ -274,6 +276,7 @@ class IdentificationStage(BaseModel):
     vip_required = BooleanField(default=False)
     for_order = BooleanField(default=False)
     type = CharField()
+    # actual_type = CharField()
 
 
 class IdentificationQuestion(BaseModel):
@@ -286,6 +289,7 @@ class UserIdentificationAnswer(BaseModel):
     question = ForeignKeyField(IdentificationQuestion, related_name='identification_answers')
     user = ForeignKeyField(User, related_name='identification_answers')
     content = CharField()
+    # actual_type = CharField()
 
 
 class OrderIdentificationAnswer(BaseModel):
@@ -293,6 +297,7 @@ class OrderIdentificationAnswer(BaseModel):
     question = ForeignKeyField(IdentificationQuestion, related_name='identification_answers')
     order = ForeignKeyField(Order, related_name='identification_answers')
     content = CharField()
+    # actual_type = CharField()
     msg_id = CharField(null=True)
 
 

@@ -1,3 +1,4 @@
+from collections import defaultdict
 import datetime
 import operator
 
@@ -5,12 +6,12 @@ from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
 
 from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, get_full_product_info, get_currency_symbol
-from .btc_wrapper import CurrencyConverter
+from .btc_wrapper import CurrencyConverter, wallet_enable_hd
 from .cart_helper import Cart
 
 from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission,\
     UserIdentificationAnswer, Product, ProductCategory, WorkingHours, Currencies, User, CurrencyRates, \
-    BitcoinCredentials, Channel, ChannelPermissions
+    BitcoinCredentials, Channel, ChannelPermissions, Location
 from . import keyboards, messages, states
 
 
@@ -83,7 +84,7 @@ def send_identification_answers(answers, bot, chat_id, send_one=False, channel=F
         question = answer.question.content
         if type in ('photo', 'video'):
             media_class = class_map[type]
-            content = media_class(content, question)
+            content = media_class(media=content, caption=question)
             photos.append(content)
             photos_answers.append(answer)
         else:
@@ -173,6 +174,20 @@ def check_order_now_allowed():
     return res
 
 
+def calculate_delivery_fee(delivery_method, location, total, is_vip):
+    if delivery_method == Order.DELIVERY:
+        if location and location.delivery_fee is not None:
+            delivery_fee, delivery_min = location.delivery_fee, location.delivery_min
+        else:
+            delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
+        if total < delivery_min or delivery_min == 0:
+            if not is_vip or config.delivery_fee_for_vip:
+                return delivery_fee
+    return 0
+
+
+
+
 def get_order_subquery(action, val, month, year):
     val = int(val)
     query = []
@@ -188,12 +203,14 @@ def get_order_subquery(action, val, month, year):
 
 def get_order_count_and_price(*subqueries):
     _ = get_channel_trans()
-    orders_count = Order.select().where(*subqueries).count()
+    currency = get_currency_symbol()
+    orders = Order.select().where(*subqueries)
+    orders_count = orders.count()
     total_price = 0
     products_count = {}
-    product_text = ''
-    count_text = _('count')
-    price_text = _('price')
+    stats_text = ''
+    count_text = _('Count')
+    price_text = _('Price')
     orders_items = OrderItem.select().join(Order).where(*subqueries)
     for order_item in orders_items:
         total_price += order_item.total_price
@@ -204,18 +221,38 @@ def get_order_count_and_price(*subqueries):
                 products_count[title][price_text] += price
         except KeyError:
             products_count[title] = {count_text: count, price_text: price}
-    for x in products_count:
-        product_name = escape(x)
-        product_name = '<b>{}</b>'.format(product_name)
-        product_text += _('\n Product: ')
-        product_text += product_name
-        product_text += '\n'
-        for y in products_count[x]:
-            product_text += y
-            product_text += ' = '
-            product_text += str(products_count[x][y])
-            product_text += '\n'
-    return orders_count, total_price, product_text
+    for title, data in products_count.items():
+        title = escape_markdown(title)
+        stats_text += _('\nProduct: ')
+        stats_text += title
+        stats_text += '\n'
+        for k, v in data.items():
+            if k == price_text:
+                v = '{}{}'.format(v, currency)
+            text = '{} = {}'.format(k, v)
+            stats_text += text
+            stats_text += '\n'
+    locations = defaultdict(int)
+    for order in orders:
+        if order.location:
+            locations[order.location.title] += order.delivery_fee
+        else:
+            locations['All locations'] += order.delivery_fee
+    locations = sorted([(title, total) for  title, total in locations.items()], key=lambda x: x[1])
+    locations_str = ''
+    for title, total in locations:
+        if total:
+            title = escape_markdown(title)
+            locations_str += '{}: {}{}'.format(title, total, currency)
+            locations_str += '\n'
+            total_price += total
+    if locations_str:
+        stats_text += '\n'
+        stats_text += _('Delivery fees:')
+        stats_text += '\n'
+        stats_text += locations_str
+    total_price = '{}{}'.format(total_price, currency)
+    return orders_count, total_price, stats_text
 
 
 def check_order_products_credits(order, courier=None):
@@ -323,6 +360,22 @@ def send_products(_, bot, user_data, chat_id, products, currency):
         msg = bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, timeout=20)
         msgs_ids.append(msg['message_id'])
     return msgs_ids
+
+
+def send_menu_msg(_, bot, user, products_info, chat_id, msg_id=None, query_id=None):
+    if products_info:
+        msg = messages.create_cart_details_msg(user.id, products_info)
+    else:
+        first_name = escape_markdown(user.username)
+        msg = config.welcome_text.format(first_name)
+    reply_markup = keyboards.main_keyboard(_, user)
+    if msg_id:
+        main_msg = bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    else:
+        main_msg = bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    if query_id:
+        bot.answer_callback_query(query_id)
+    return main_msg['message_id']
 
 
 # def product_inactive(_, bot, user_data, update, product, currency):
@@ -500,6 +553,16 @@ def init_bot_tables():
             for val in perms:
                 perm = UserPermission.get(permission=val)
                 ChannelPermissions.create(channel=channel, permission=perm)
+
+
+def check_btc_status(_, wallet_id, password):
+    if not wallet_id or not password:
+        msg = _('Please set BTC wallet ID and password.')
+    else:
+        msg, success = wallet_enable_hd(_, wallet_id, password)
+        if success or msg.lower().startswith('current wallet is already an hd wallet'):
+            msg = None
+    return msg
 
 
 

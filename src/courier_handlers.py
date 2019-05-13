@@ -3,7 +3,7 @@ from telegram import ParseMode
 from .decorators import user_passes
 from .helpers import logger, config, get_channel_trans, get_trans, get_user_id, get_service_channel, get_couriers_channel
 from .models import Order, User, OrderBtcPayment
-from . import shortcuts, enums, keyboards, messages
+from . import shortcuts, enums, keyboards, messages, states
 
 
 @user_passes
@@ -28,7 +28,8 @@ def on_drop_order(bot, update, user_data):
         bot.delete_message(chat_id, msg_id)
         msg = _('Order №{} was dropped by courier').format(order_id)
         shortcuts.send_channel_msg(bot, msg, get_couriers_channel(), order=order)
-    return enums.BOT_INIT
+    return states.enter_menu(bot, update, user_data)
+    # return enums.BOT_INIT
         # order_pickup_state = order.shipping_method
     # order_location = order_info.location
     # if order_location:
@@ -45,26 +46,29 @@ def on_courier_action_to_confirm(bot, update, user_data):
     _ = get_trans(user_id)
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action, order_id = query.data.split('|')
+    # user_data['courier_msg_id'] = msg_id
     msg = _('Are you sure?')
     user_data['courier_menu'] = {'msg_to_delete': msg_id, 'order_id': order_id}
     reply_markup = keyboards.are_you_sure_keyboard(_)
     bot.send_message(chat_id, msg, reply_markup=reply_markup)
     query.answer()
-    if action == 'confirm_courier_order_delivered':
+    if action == 'courier_menu_delivered':
         return enums.COURIER_STATE_CONFIRM_ORDER
-    elif action == 'confirm_courier_report_client':
+    elif action == 'courier_menu_report':
         return enums.COURIER_STATE_CONFIRM_REPORT
 
 
 @user_passes
 def on_courier_ping_choice(bot, update, user_data):
+    print('entered ping')
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     action, order_id = query.data.split('|')
     chat_id, msg_id = query.message.chat_id, query.message.message_id
+    # user_data['courier_msg_id'] = msg_id
     msg = _('📞 Ping Client')
-    user_data['courier_menu'] = {'ping_admin': action == 'ping_client_admin', 'order_id': order_id}
+    user_data['courier_menu'] = {'ping_admin': action == 'courier_menu_ping_admin', 'order_id': order_id}
     reply_markup = keyboards.create_ping_client_keyboard(_)
     bot.send_message(chat_id, msg, reply_markup=reply_markup)
     query.answer()
@@ -165,13 +169,15 @@ def on_courier_confirm_order(bot, update, user_data):
         delete_msg_id = user_data['courier_menu']['msg_to_delete']
         bot.delete_message(chat_id, delete_msg_id)
         bot.edit_message_text(courier_msg, chat_id, msg_id)
-        service_channel = config.get_service_channel()
+        service_channel = get_service_channel()
         # shortcuts.bot_send_order_msg(bot, service_channel, msg, _, order_id, channel=True)
         shortcuts.send_channel_msg(bot, msg, service_channel, order=order)
-        return enums.COURIER_STATE_INIT
+        return states.enter_menu(bot, update, user_data)
+        # return enums.BOT_INIT
     elif action == 'no':
         bot.delete_message(chat_id, msg_id)
         return enums.COURIER_STATE_INIT
+        # return enums.BOT_INIT
 
 
 @user_passes
@@ -189,6 +195,7 @@ def on_courier_confirm_report(bot, update, user_data):
     elif action == 'no':
         bot.delete_message(chat_id, msg_id)
         return enums.COURIER_STATE_INIT
+        # return enums.BOT_INIT
 
 
 @user_passes
@@ -217,6 +224,7 @@ def on_courier_enter_reason(bot, update, user_data):
     service_channel = get_service_channel()
     shortcuts.send_channel_msg(bot, report_msg, service_channel, order=order, parse_mode=None)
     return enums.COURIER_STATE_INIT
+    # return enums.BOT_INIT
 
 
 def on_courier_cancel_reason(bot, update, user_data):
@@ -225,6 +233,7 @@ def on_courier_cancel_reason(bot, update, user_data):
     _ = get_trans(user_id)
     bot.delete_message(chat_id=query.message.chat_id, message_id=query.message.message_id)
     return enums.COURIER_STATE_INIT
+    # return enums.BOT_INIT
 
 
 def on_admin_drop_order(bot, update, user_data):
@@ -238,9 +247,11 @@ def on_admin_drop_order(bot, update, user_data):
     order.courier = None
     order.save()
     chat_id = query.message.chat_id
-    message_id = query.message.message_id
-    bot.delete_message(chat_id, message_id)
+    msg_id = query.message.message_id
+    # user_data['courier_msg_id'] = msg_id
+    bot.delete_message(chat_id, msg_id)
     msg = _('Order №{} was dropped!').format(order.id)
     bot.send_message(chat_id, msg)
-    return enums.BOT_INIT
+    return states.enter_menu(bot, update, user_data)
+    # return enums.BOT_INIT
 

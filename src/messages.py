@@ -4,7 +4,7 @@ from datetime import datetime
 from telegram.utils.helpers import escape_markdown
 
 from .cart_helper import Cart
-from .helpers import get_trans, calculate_discount_total, config, quantize_btc, get_currency_symbol
+from .helpers import get_trans, calculate_discount_percents, config, quantize_btc, get_currency_symbol
 from .models import Location, Currencies, BtcStatus, OrderBtcPayment, BtcStage, WorkingHours, User
 from .btc_wrapper import CurrencyConverter
 
@@ -129,7 +129,7 @@ def create_admin_product_description(trans, product_title, product_prices):
     return text
 
 
-def create_confirmation_text(user_id, order_details, total, products_info):
+def create_confirmation_text(user_id, order_details, total, products_info, delivery_fee):
     _ = get_trans(user_id)
     text = _('Please confirm your order:')
     text += '\n\n'
@@ -153,42 +153,43 @@ def create_confirmation_text(user_id, order_details, total, products_info):
         text += '\n'
     text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
 
-    is_vip = user.is_vip_client
-    delivery_method = order_details['delivery']
+    # is_vip = user.is_vip_client
+    # delivery_method = order_details['delivery']
     btc_payment = order_details.get('btc_payment')
-    if delivery_method == 'delivery':
-        loc_id = order_details.get('location_id')
-        if loc_id:
-            location = Location.get(id=loc_id)
-        else:
-            location = None
-        if location and location.delivery_fee is not None:
-            delivery_fee, delivery_min = location.delivery_fee, location.delivery_min
-        else:
-            delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
-        if total < delivery_min or delivery_min == 0:
-            if not is_vip or config.delivery_fee_for_vip:
-                text += '\n'
-                text += _('Delivery Fee: {}{}').format(delivery_fee, currency_symbol)
-    else:
-        delivery_fee = 0
+    # calculated_fee = 0
+    # if delivery_method == 'delivery':
+    #     loc_id = order_details.get('location_id')
+    #     if loc_id:
+    #         location = Location.get(id=loc_id)
+    #     else:
+    #         location = None
+    #     if location and location.delivery_fee is not None:
+    #         delivery_fee, delivery_min = location.delivery_fee, location.delivery_min
+    #     else:
+    #         delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
+    #     if total < delivery_min or delivery_min == 0:
+    #         if not is_vip or config.delivery_fee_for_vip:
+    #             calculated_fee = CurrencyConverter.convert_currencies(delivery_fee, config.currency, currency)
+    #             text += '\n'
+    #             text += _('Delivery Fee: {}{}').format(calculated_fee, currency_symbol)
 
     discount = config.discount
     discount_min = config.discount_min
+    discount_min = CurrencyConverter.convert_currencies(discount_min, config.currency, currency)
     if discount_min != 0:
-        if is_vip:
-            discount_num = calculate_discount_total(discount, total)
-            if discount_num and total >= discount_min:
-                if not discount.endswith('%'):
-                    text += '\n'
-                    discount_str = '{}'.format(discount)
-                    discount_str += currency_symbol
-                    total -= int(discount)
-                else:
-                    text += '\n'
-                    discount_str = discount
-                    total -= discount_num
-                text += _('Discount: {}').format(discount_str)
+        discount_num = calculate_discount_percents(discount, total)
+        if discount_num and total >= discount_min:
+            if not discount.endswith('%'):
+                discount = int(discount)
+                discount = CurrencyConverter.convert_currencies(discount, config.currency, currency)
+                total -= discount
+                discount_str = '{}{}'.format(discount, currency_symbol)
+                discount_str += currency_symbol
+            else:
+                discount_str = discount
+                total -= discount_num
+            text += '\n'
+            text += _('Discount: {}').format(discount_str)
 
     total += delivery_fee
 
@@ -197,7 +198,7 @@ def create_confirmation_text(user_id, order_details, total, products_info):
     text += '\n'
     btc_value = None
     if btc_payment:
-        total = CurrencyConverter.convert_currencies(total, user.currency, currency)
+        # total = CurrencyConverter.convert_currencies(total, user.currency, currency)
         btc_info = CurrencyConverter().convert_to_btc(currency, total)
         if btc_info:
             btc_value = btc_info
@@ -242,8 +243,9 @@ def create_service_notice(_, order, btc_data=None, for_courier=False):
     text += _('Items in cart:')
     text += '\n'
 
-    total = 0
+    # total = 0
 
+    user = order.user
     for order_item in order.order_items:
         title = escape_markdown(order_item.product.title)
         text += '\n'
@@ -251,43 +253,46 @@ def create_service_notice(_, order, btc_data=None, for_courier=False):
         text += '\n'
         text += _('x {} = {}{}').format(order_item.count, order_item.total_price, currency)
         text += '\n'
-        total += order_item.total_price
-    user = order.user
-    is_vip = user.is_vip_client
-    if order.shipping_method == order.DELIVERY:
-        shipping_loc = order.location
-        if shipping_loc and shipping_loc.delivery_fee is not None:
-            delivery_fee, delivery_min = shipping_loc.delivery_fee, shipping_loc.delivery_min
-        else:
-            delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
-        if total < delivery_min or delivery_min == 0:
-            if not is_vip or config.delivery_fee_for_vip:
-                text += '\n'
-                text += _('Delivery Fee: {}{}').format(delivery_fee, currency)
-    else:
-        delivery_fee = 0
+        # total += order_item.total_price
+
+    # is_vip = user.is_vip_client
+    # if order.shipping_method == order.DELIVERY:
+    #     shipping_loc = order.location
+    #     if shipping_loc and shipping_loc.delivery_fee is not None:
+    #         delivery_fee, delivery_min = shipping_loc.delivery_fee, shipping_loc.delivery_min
+    #     else:
+    #         delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
+    #     if total < delivery_min or delivery_min == 0:
+    #         if not is_vip or config.delivery_fee_for_vip:
+    #             text += '\n'
+    #             text += _('Delivery Fee: {}{}').format(delivery_fee, currency)
+    # else:
+    #     delivery_fee = 0
+    total = order.total_cost
 
     discount = config.discount
     discount_min = config.discount_min
     if discount_min != 0:
-        if is_vip:
-            discount_num = calculate_discount_total(discount, total)
-            if discount_num and total >= discount_min:
-                if not discount.endswith('%'):
-                    text += '\n'
-                    discount_str = '{}'.format(discount)
-                    discount_str += '{}'.format(currency)
-                    total -= int(discount)
-                else:
-                    text += '\n'
-                    discount_str = discount
-                    total -= discount_num
-                text += _('Discount: {}').format(discount_str)
+        discount_num = calculate_discount_percents(discount, total)
+        if discount_num and total >= discount_min:
+            if not discount.endswith('%'):
+                discount_str = '{}'.format(discount)
+                discount_str += '{}'.format(currency)
+                total -= int(discount)
+            else:
+                discount_str = discount
+                total -= discount_num
+            text += '\n'
+            text += _('Discount: {}').format(discount_str)
 
-    total += delivery_fee
+    total += order.delivery_fee
 
     text += '\n'
     text += _('Total: {}{}').format(total, currency)
+
+    if currency != user.currency:
+        text += '\n\n'
+        text += _('User\'s currency: {}').format(Currencies.CURRENCIES[user.currency][0])
 
     text += '\n'
     if order.btc_payment:

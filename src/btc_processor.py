@@ -14,12 +14,12 @@ from . import shortcuts
 
 def start_orders_processing(bot):
     orders = Order.select().join(OrderBtcPayment)\
-        .where(Order.btc_payment == True, Order.status.in_(Order.PROCESSING, Order.CONFIRMED),
+        .where(Order.btc_payment == True, Order.status.in_((Order.PROCESSING, Order.CONFIRMED)),
                ((OrderBtcPayment.payment_stage == BtcStage.FIRST)
                 | ((OrderBtcPayment.payment_stage == BtcStage.SECOND) & (OrderBtcPayment.paid_status.not_in([BtcStatus.PAID, BtcStatus.HIGHER])))
                 ))
     for o in orders:
-        # set_btc_proc(o.id)
+        set_btc_proc(o.id)
         print(o.id)
         btc_data = OrderBtcPayment.get(order=o)
         print(btc_data.id)
@@ -59,6 +59,7 @@ def save_order_refresh_msg(trans, bot, order, status, balance):
     msg_id = shortcuts.edit_channel_msg(bot, order_msg, service_channel,
                                         order.order_text_msg_id, keyboard, order)
     order.order_text_msg_id = msg_id
+    order.order_hidden_msg = order_msg
     order.save()
     btc_data.save()
     return btc_data
@@ -184,7 +185,7 @@ def clear_procs(order_id):
 
 def set_btc_proc(order_id):
     try:
-        proc = BtcProc.get(order_id=order_id)
+        BtcProc.get(order_id=order_id)
     except BtcProc.DoesNotExist:
         BtcProc.create(order_id=order_id)
 

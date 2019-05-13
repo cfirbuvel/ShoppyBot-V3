@@ -16,7 +16,7 @@ from telegram import TelegramError
 
 # from .btc_wrapper import CurrencyConverter
 from .models import ProductCount, Product, User, OrderItem, Currencies, ConfigValue, UserPermission,\
-    BitcoinCredentials, Channel, ChannelPermissions, CurrencyRates
+    BitcoinCredentials, Channel, ChannelPermissions, CurrencyRates, Location, Order
 
 
 class JsonRedis(redis.StrictRedis):
@@ -244,7 +244,7 @@ def parse_discount(discount_str):
         return discount_str, 0
 
 
-def calculate_discount_total(discount, total):
+def calculate_discount_percents(discount, total):
     if discount.endswith('%'):
         discount = discount.replace('%', '').strip()
         discount = round(total / 100 * int(discount))
@@ -371,6 +371,11 @@ def get_reviews_channel():
 
 def get_couriers_channel():
     return Channel.get(conf_name='couriers_channel').channel_id
+
+
+def send_state(state, user_data):
+    user_data['current_state'] = state
+    return state
 
 
 cat = gettext.GNUTranslations(open('he.mo', 'rb'))

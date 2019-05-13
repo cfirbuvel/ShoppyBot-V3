@@ -13,7 +13,7 @@ from .decorators import user_passes
 from .btc_wrapper import BtcWallet, BtcSettings, BtcError
 from .btc_processor import set_btc_proc, process_btc_payment
 from .helpers import get_user_id, get_username, get_locale, get_trans, config, logger, get_full_product_info, \
-    get_user_update_username, get_channel_trans, clear_user_data, get_service_channel, get_couriers_channel
+    get_channel_trans, clear_user_data, get_service_channel, get_couriers_channel
 from .models import User, Product, ProductCategory, Order, Location, OrderBtcPayment, BitcoinCredentials, \
     Channel, UserPermission, IdentificationStage, IdentificationQuestion, UserIdentificationAnswer,\
     ChannelPermissions, WorkingHours, OrderIdentificationAnswer, BtcStage, ProductWarehouse, OrderItem,\
@@ -26,11 +26,12 @@ def on_start(bot, update, user_data):
     username = get_username(update)
     locale = get_locale(update)
     clear_user_data(user_data, 'menu_id', 'cart', 'courier_menu')
-    try:
-        user = get_user_update_username(user_id, username)
-    except User.DoesNotExist:
-        default_permission = UserPermission.get(permission=UserPermission.NOT_REGISTERED)
-        user = User.create(telegram_id=user_id, username=username, locale=locale, permission=default_permission)
+    # try:
+    #     user = get_user_update_username(user_id, username)
+    # except User.DoesNotExist:
+    #     default_permission = UserPermission.get(permission=UserPermission.NOT_REGISTERED)
+    #     user = User.create(telegram_id=user_id, username=username, locale=locale, permission=default_permission)
+    user = User.get(telegram_id=user_id)
     _ = get_trans(user_id)
     chat_id = update.effective_chat.id
     if user.is_admin:
@@ -79,11 +80,12 @@ def on_menu(bot, update, user_data):
                     bot.delete_message(chat_id, msg_id)
                     products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                     user_data['products_msgs'] = products_msgs
-                    return states.enter_menu(bot, update, user_data)
+                    return states.enter_menu(bot, update, user_data, query.id)
                 else:
                     query.answer()
                     return enums.BOT_INIT
         elif data == 'menu_order':
+            print('order')
             delivery_method = config.delivery_method
             if not delivery_method:
                 msg = _('Sorry, we have technical issues. Cannot make order now.')
@@ -120,14 +122,14 @@ def on_menu(bot, update, user_data):
                         if products.exists():
                             products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                             user_data['products_msgs'] = products_msgs
-                        return states.enter_menu(bot, update, user_data)
+                        return states.enter_menu(bot, update, user_data, query.id)
                     else:
                         products = Product.select().where(Product.is_active == True)
                         if products.exists():
                             products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                             user_data['products_msgs'] = products_msgs
                         menu_msg_id = user_data['menu_id']
-                        return states.enter_menu(bot, update, user_data, menu_msg_id)
+                        return states.enter_menu(bot, update, user_data, menu_msg_id, query.id)
                 if user.is_admin:
                     log_msg = 'Starting order process for Admin - From admin_id: %s, username: @%s'
                 else:
@@ -137,7 +139,8 @@ def on_menu(bot, update, user_data):
                 if delivery_method == 'both':
                     return states.enter_order_delivery(_, bot, chat_id, msg_id, query.id)
                 else:
-                    user_data['order_details']['delivery'] = delivery_method
+                    action_map = {'delivery': Order.DELIVERY, 'pickup': Order.PICKUP}
+                    user_data['order_details']['delivery'] = action_map[delivery_method]
                     if Location.select().exists():
                         user_data['listing_page'] = 1
                         return states.enter_order_locations(_, bot, chat_id,  delivery_method, msg_id, query.id)
@@ -171,7 +174,7 @@ def on_menu(bot, update, user_data):
         elif data.startswith('menu_register'):
             return states.enter_registration(_, bot, chat_id, msg_id, query.id)
         elif data == 'menu_hours':
-            msg = config.working_hours
+            msg = messages.get_working_hours_msg(_)
             reply_markup = keyboards.main_keyboard(_, user)
             bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
             query.answer()
@@ -206,13 +209,13 @@ def on_menu(bot, update, user_data):
                     if products.exists():
                         products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                         user_data['products_msgs'] = products_msgs
-                    return states.enter_menu(bot, update, user_data)
+                    return states.enter_menu(bot, update, user_data, menu_msg_id, query.id)
                 else:
                     products = Product.select().where(Product.is_active == True)
                     if products.exists():
                         products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                         user_data['products_msgs'] = products_msgs
-                    return states.enter_menu(bot, update, user_data, menu_msg_id)
+                    return states.enter_menu(bot, update, user_data, menu_msg_id, query.id)
             product_count = Cart.get_product_count(user_data, product_id)
             if action == 'product_add':
                 user_data = Cart.add(user_data, product_id)
@@ -252,7 +255,8 @@ def on_order_delivery(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action = query.data
     if action in ('pickup', 'delivery'):
-        user_data['order_details']['delivery'] = action
+        action_map = {'pickup': Order.PICKUP, 'delivery': Order.DELIVERY}
+        user_data['order_details']['delivery'] = action_map[action]
         if Location.select().exists():
             user_data['listing_page'] = 1
             return states.enter_order_locations(_, bot, chat_id, action, msg_id, query.id)
@@ -275,11 +279,11 @@ def on_order_locations(bot, update, user_data):
         delivery_method = user_data['order_details']['delivery']
         page = int(val)
         user_data['listing_page'] = page
-        return  states.enter_order_locations(_, bot, chat_id, delivery_method, msg_id, query.id, page)
+        return states.enter_order_locations(_, bot, chat_id, delivery_method, msg_id, query.id, page)
     elif action == 'select':
         delivery_method = user_data['order_details']['delivery']
         user_data['order_details']['location_id'] = val
-        if delivery_method == 'pickup':
+        if delivery_method == Order.PICKUP:
             order_now = shortcuts.check_order_now_allowed()
             return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, order_now, msg_id, query.id)
         else:
@@ -289,7 +293,7 @@ def on_order_locations(bot, update, user_data):
         if config.delivery_method == 'both':
             return states.enter_order_delivery(_, bot, chat_id, msg_id, query.id)
         else:
-            return states.enter_menu(bot, update, user_data, msg_id, query.id)
+            return states.enter_menu(bot, update, user_data)
     elif action == 'cancel':
         msg = _('Order was cancelled')
         bot.edit_message_text(msg, chat_id, msg_id)
@@ -348,7 +352,7 @@ def on_order_datetime_select(bot, update, user_data):
         return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, False, msg_id, query.id)
     elif action == 'back':
         delivery_method = user_data['order_details']['delivery']
-        if delivery_method == 'delivery':
+        if delivery_method == Order.DELIVERY:
             return states.enter_order_delivery_address(_, bot, chat_id, query.id)
         else:
             return states.enter_order_locations(_, bot, chat_id, action, msg_id, query.id)
@@ -400,7 +404,7 @@ def on_order_date_select(bot, update, user_data):
             return states.enter_order_shipping_time(_, bot, chat_id, action, user_data, order_now, msg_id, query.id)
         else:
             delivery_method = user_data['order_details']['delivery']
-            if delivery_method == 'delivery':
+            if delivery_method == Order.DELIVERY:
                 return states.enter_order_delivery_address(_, bot, chat_id, query.id)
             else:
                 return states.enter_order_locations(_, bot, chat_id, action, msg_id, query.id)
@@ -475,15 +479,17 @@ def on_order_phone_number(bot, update, user_data):
     bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
     user = User.get(telegram_id=user_id)
     now = datetime.datetime.now()
+    id_stages = None
     if now - datetime.timedelta(hours=24) > user.registration_time:
         if not Order.select().where(Order.user == User).exists():
-            user = User.get(telegram_id=user_id)
-            query = (IdentificationStage.for_order == True & IdentificationStage.active == True)
-            if user.is_vip_client:
-                query = query & IdentificationStage.vip_required == True
-            id_stages = IdentificationStage.select().where(query)
-            if id_stages.exists():
-                return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
+            id_stages = IdentificationStage.select().where(IdentificationStage.for_order == True, IdentificationStage.active == True)
+    elif not user.is_registered:
+        id_stages = IdentificationStage.select()
+    if id_stages:
+        if user.is_vip_client:
+            id_stages =  id_stages.select().where(IdentificationStage.vip_required == True)
+        if id_stages.exists():
+            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
     if BitcoinCredentials.select().first().enabled:
         return states.enter_order_payment_type(_, bot, chat_id)
     else:
@@ -503,6 +509,7 @@ def on_order_identification(bot, update, user_data):
             passed_ids = id_data['passed_ids']
             if passed_ids:
                 prev_stage, prev_q = passed_ids.pop()
+                print(prev_stage, prev_q)
                 id_data['current_id'] = prev_stage
                 id_data['current_q_id'] = prev_q
                 question = IdentificationQuestion.get(id=prev_q)
@@ -521,16 +528,15 @@ def on_order_identification(bot, update, user_data):
             return states.enter_unknown_command(_, bot, query)
     current_id = id_data['current_id']
     current_stage = IdentificationStage.get(id=current_id)
-    if current_stage.type in ('photo', 'video'):
+    answer_type = current_stage.type
+    if answer_type in ('photo', 'video'):
         try:
-            if current_stage.type == 'photo':
-                answer = update.message.photo
-                answer = answer[-1].file_id
-            else:
-                answer = update.message.video
-                answer = answer.file_id
+            answer = getattr(update.message, answer_type)
+            if type(answer) == list:
+                answer = answer[-1]
+            answer = answer.file_id
         except (IndexError, AttributeError):
-            text = _(current_stage.type)
+            text = _(answer_type)
             msg = _('_Please upload a {} as an answer_').format(text)
             bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
             return enums.BOT_CHECKOUT_IDENTIFY
@@ -542,9 +548,12 @@ def on_order_identification(bot, update, user_data):
     passed_ids.append((current_id, current_q_id))
     passed_stages_ids = [v[0] for v in passed_ids]
     user = User.get(telegram_id=user_id)
-    query = (IdentificationStage.for_order == True & IdentificationStage.active == True & IdentificationStage.id.not_in(passed_stages_ids))
-    if user.is_vip_client:
-        query = query & IdentificationStage.vip_required == True
+    if not user.is_registered:
+        query = IdentificationStage.id.not_in(passed_stages_ids)
+    else:
+        query = (IdentificationStage.for_order == True & IdentificationStage.active == True & IdentificationStage.id.not_in(passed_stages_ids))
+        if user.is_vip_client:
+            query = query & IdentificationStage.vip_required == True
     stages_left = IdentificationStage.select().where(query)
     if stages_left:
         next_stage = stages_left[0]
@@ -578,6 +587,7 @@ def on_order_payment_type(bot, update, user_data):
     elif action == 'back':
         id_data = user_data['order_details'].get('identification')
         if id_data:
+            id_data['passed_ids'].pop()
             last_q_id = id_data['current_q_id']
             last_question = IdentificationQuestion.get(id=last_q_id)
             msg = last_question.content
@@ -605,13 +615,10 @@ def on_order_confirm(bot, update, user_data):
         order_data = user_data['order_details']
         delivery_method = order_data['delivery']
         location = None
-        if delivery_method == 'delivery':
+        if delivery_method == Order.DELIVERY:
             loc_id = order_data.get('location_id')
             if loc_id:
                 location = Location.get(id=loc_id)
-            delivery_method = Order.DELIVERY
-        else:
-            delivery_method = Order.PICKUP
         shipping_time = order_data['datetime']
         order_address = order_data.get('address', '')
         phone_number = order_data.get('phone_number')
@@ -652,12 +659,16 @@ def on_order_confirm(bot, update, user_data):
         # ORDER CONFIRMED, send the details to service channel
         # user_name = escape_markdown(order.user.username)
         if location:
-            location = escape_markdown(location.title)
+            location_title = escape_markdown(location.title)
         else:
-            location = '-'
-        text = _('Order №{}, Location {}\nUser @{}').format(order_id, location, user.username)
+            location_title = '-'
+        text = _('Order №{}, Location {}\nUser @{}').format(order_id, location_title, user.username)
         service_channel = get_service_channel()
-        Cart.fill_order(user_data, order, user.currency)
+        total = Cart.fill_order(user_data, order, user.currency)
+        delivery_fee = shortcuts.calculate_delivery_fee(delivery_method, location, total, user.is_vip_client)
+        order.delivery_fee = delivery_fee
+        order.total_cost = total
+        order.save()
         # text = messages.create_service_notice(_, order, btc_data)
         reply_markup = keyboards.show_order_keyboard(_, order_id)
         channel_msg_id = shortcuts.send_channel_msg(bot, text, service_channel, reply_markup, order)
@@ -683,7 +694,7 @@ def on_order_confirm(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id)
         query.answer()
         return states.enter_menu(bot, update, user_data)
-    elif action == _('back'):
+    elif action == 'back':
         btc_enabled = BitcoinCredentials.select().first().enabled
         if btc_enabled:
             return states.enter_order_payment_type(_, bot, chat_id, msg_id, query.id)
@@ -819,9 +830,10 @@ def on_registration(bot, update, user_data):
             bot.send_message(chat_id, msg, reply_markup=keyboards.phone_number_request_keyboard(_))
             query.answer()
             return enums.BOT_PHONE_NUMBER
-    else:
+    elif action == 'cancel':
         if config.only_for_registered:
             bot.delete_message(chat_id, msg_id)
+            return ConversationHandler.END
         else:
             return states.enter_menu(bot, update, user_data, msg_id)
     return states.enter_unknown_command(_, bot, query)
@@ -857,7 +869,10 @@ def on_registration_repeat(bot, update, user_data):
             query.answer()
             return enums.BOT_PHONE_NUMBER
     elif action == 'no':
-        return states.enter_menu(bot, update, user_data, msg_id)
+        if config.only_for_registered:
+            return states.enter_registration(_, bot, chat_id, msg_id, query.id)
+        else:
+            return states.enter_menu(bot, update, user_data, msg_id)
     return states.enter_unknown_command(_, bot, query)
 
 
@@ -893,21 +908,22 @@ def on_registration_identification(bot, update, user_data):
             return states.enter_unknown_command(_, bot, query)
     current_id = id_data['current_id']
     current_stage = IdentificationStage.get(id=current_id)
-    if current_stage.type in ('photo', 'video'):
+    answer_type = current_stage.type
+    print(answer_type)
+    if answer_type in ('photo', 'video'):
         try:
-            if current_stage.type == 'photo':
-                answer = update.message.photo
-                answer = answer[-1].file_id
-            else:
-                answer = update.message.video
-                answer = answer.file_id
+            answer = getattr(update.message, answer_type)
+            if type(answer) == list:
+                answer = answer[-1]
+            answer = answer.file_id
         except (IndexError, AttributeError):
             answer = None
     else:
         answer = update.message.text
+    print(answer)
     # trans here
     if not answer:
-        text = _(current_stage.type)
+        text = _(answer_type)
         msg = _('Please upload a {} as an answer').format(text)
         bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_), )
         return enums.BOT_IDENTIFICATION
@@ -999,7 +1015,7 @@ def on_channels(bot, update, user_data):
     action = query.data
     if action == 'back':
         return states.enter_menu(bot, update, user_data, query.message.message_id, query.id)
-    return states.enter_unknown_command(_, bot, query)
+    # return states.enter_unknown_command(_, bot, query)
 
 
 def on_error(bot, update, error):
@@ -1345,7 +1361,7 @@ def on_service_order_message(bot, update, user_data):
             btc_data = OrderBtcPayment.get(order=order)
         except OrderBtcPayment.DoesNotExist:
             btc_data = None
-        msg = messages.create_service_notice(_, order, btc_data)
+        msg = messages.create_service_notice(_, order,  btc_data)
         keyboard = keyboards.service_channel_keyboard(_, order)
         msg_id = shortcuts.send_channel_msg(bot, msg, chat_id, keyboard, order)
         order.order_text_msg_id = msg_id
@@ -1566,13 +1582,21 @@ def service_channel_courier_query_handler(bot, update, user_data):
                         courier_trans = get_trans(courier_id)
                         warehouse_error_msg = courier_trans('You don\'t have enough credits in warehouse')
                         warehouse_error_msg += '\n'
-                        warehouse_error_msg += courier_trans('Product: `{}`\nCount: {}\nCredits: {}\n').format(product.title,
-                                                                                                               item.count,
-                                                                                                               warehouse_count)
+                        product_title = escape_markdown(product.title)
+                        msg_ending = 'Product: `{}`\nCount: {}\nCredits: {}'.format(product_title, item.count, warehouse_count)
                         break
             if warehouse_error_msg:
+                warehouse_error_msg += courier_trans(msg_ending)
                 query.answer(_('Cannot take this order'), show_alert=True)
                 bot.send_message(courier_id, warehouse_error_msg, parse_mode=ParseMode.MARKDOWN)
+                _ = get_channel_trans()
+                service_msg = _('Order №{}').format(order.id)
+                service_msg += '\n'
+                courier_username = escape_markdown(courier.username)
+                service_msg = _('Courier `{}` doesn\'t have enough credits in warehouse').format(courier_username)
+                service_msg += '\n'
+                service_msg += _(msg_ending)
+                bot.send_message(get_service_channel(), service_msg, parse_mode=ParseMode.MARKDOWN)
             else:
                 shortcuts.change_order_products_credits(order, courier=courier)
                 order.courier = courier

@@ -9,10 +9,11 @@ from telegram.utils.helpers import escape_markdown, escape
 from . import keyboards, messages, enums, shortcuts
 from .cart_helper import Cart
 from .models import Location, User, OrderBtcPayment, Channel, IdentificationStage, UserPermission, CourierLocation, \
-    Product, WorkingHours, GroupProductCount, ProductCount, GroupProductCountPermission
+    Product, WorkingHours, GroupProductCount, ProductCount, GroupProductCountPermission, Order
 from .helpers import config, get_user_id, get_trans, is_vip_customer, is_admin, get_username, \
     get_user_update_username, logger, get_currency_symbol
 from .btc_settings import BtcSettings
+from .btc_wrapper import CurrencyConverter
 
 
 #
@@ -22,8 +23,8 @@ from .btc_settings import BtcSettings
 
 def enter_unknown_command(_, bot, query):
     logger.info('Unknown command - {}'.format(query.data))
-    msg = _('Unknown command.')
-    bot.send_message(query.message.chat_id, msg)
+    # msg = _('Unknown command.')
+    # bot.send_message(query.message.chat_id, msg)
     query.answer()
     return ConversationHandler.END
 
@@ -366,6 +367,10 @@ def enter_locations_view(_, bot, chat_id, msg_id, query_id, page, msg=None):
 def enter_working_days(_, bot, chat_id, msg_id=None, query_id=None, msg=None):
     if not msg:
         msg = _('Please select working day')
+        msg += '\n'
+        msg += _('Current working hours:')
+        msg += '\n'
+        msg += messages.get_working_hours_msg(_)
     days = [(day[1], day[0]) for day in WorkingHours.DAYS]
     reply_markup = keyboards.general_select_one_keyboard(_, days)
     if msg_id:
@@ -398,7 +403,7 @@ def enter_order_delivery(_, bot, chat_id, msg_id=None, query_id=None):
 
 
 def enter_order_locations(_, bot, chat_id, action, msg_id=None, query_id=None, page_num=1):
-    if action == 'pickup':
+    if action == Order.PICKUP:
         msg = _('Please select location to pickup')
     else:
         msg = _('Please select courier location')
@@ -423,7 +428,7 @@ def enter_order_delivery_address(_, bot, chat_id, query_id=None):
 
 
 def enter_order_shipping_time(_, bot, chat_id, action, user_data, order_now, msg_id=None, query_id=None):
-    if action == 'pickup':
+    if action == Order.PICKUP:
         msg = _('Please select day when you want to pickup order')
     else:
         msg = _('Please select delivery day')
@@ -525,7 +530,15 @@ def enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id=None, q
     products_info = Cart.get_products_info(user_data, user.currency)
     order_details = user_data['order_details']
     btc_payment = order_details.get('btc_payment')
-    text, btc_value = messages.create_confirmation_text(user_id, order_details, total, products_info)
+    location_id = order_details.get('location_id')
+    try:
+        location = Location.get(id=location_id)
+    except Location.DoesNotExist:
+        location = None
+    delivery_fee = shortcuts.calculate_delivery_fee(order_details['delivery'], location, total, user.is_vip_client)
+    if delivery_fee:
+        delivery_fee = CurrencyConverter.convert_currencies(delivery_fee, config.currency, user.currency)
+    text, btc_value = messages.create_confirmation_text(user_id, order_details, total, products_info, delivery_fee)
     if btc_payment:
         if not btc_value:
             enter_btc_conversion_failed(_, bot, chat_id, msg_id, query_id)

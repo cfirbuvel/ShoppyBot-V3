@@ -30,12 +30,16 @@ class BtcWallet:
         try:
             resp = requests.get(url, params=params)
         except ConnectionError as ex:
-            error_text = str(ex)
+            logger.error('BTC request failed:\n{}'.format(str(ex)))
+            error = 'Connection error'
         else:
+            res = resp.json()
             if resp.status_code == 200:
-                return resp.json()
-            error_text = resp.text
-        logger.error('BTC request failed:\n{}'.format(error_text))
+                return res
+            else:
+                error = res.get('error', '')
+            logger.error('BTC request failed:\n{}'.format(res))
+        raise BtcError(error)
 
     def convert_to_satoshi(self, amount):
         return amount * 100000000
@@ -44,7 +48,8 @@ class BtcWallet:
         return amount / 100000000
 
     def enable_hd(self):
-        self.make_request(self.main_url + 'enableHD', {'password': self.password})
+        resp = self.make_request(self.main_url + 'enableHD', {'password': self.password})
+        return resp
 
     def check_wallet_balance(self):
         url = self.main_url + 'balance'
@@ -166,7 +171,13 @@ class BtcWallet:
 
 def wallet_enable_hd(trans, wallet_id, password, second_password=None):
     wallet = BtcWallet(trans, wallet_id, password, second_password)
-    wallet.enable_hd()
+    try:
+        res = wallet.enable_hd()
+        success = True
+    except BtcError as ex:
+        res = str(ex)
+        success = False
+    return res, success
 
 
 class CurrencyConverter:
@@ -194,7 +205,7 @@ class CurrencyConverter:
     @staticmethod
     def get_last_rates(currency):
         CurrencyConverter.fetch_update_currencies()
-        last_rates = CurrencyRates.get(currency)
+        last_rates = CurrencyRates.get(currency=currency)
         return last_rates
 
     @staticmethod

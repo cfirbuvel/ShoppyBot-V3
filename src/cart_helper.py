@@ -27,6 +27,7 @@ class Cart:
             query = (ProductCount.product == product)
         prices = ProductCount.select().where(query).order_by(ProductCount.count.asc())
         counts = [x.count for x in prices]
+        print(counts)
         if product_id not in cart:
             cart[product_id] = counts[0]
         else:
@@ -156,5 +157,8 @@ class Cart:
     @staticmethod
     def fill_order(user_data, order, currency):
         products = Cart.get_products_info(user_data, currency, for_order=True)
+        total = 0
         for p_id, p_count, p_price in products:
             OrderItem.create(order=order, product_id=p_id, count=p_count, total_price=p_price)
+            total += p_price
+        return total
