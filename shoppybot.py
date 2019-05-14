@@ -217,12 +217,19 @@ def main():
                 CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
                 CallbackQueryHandler(admin_handlers.on_statistics_general, pattern='^(back|day|month|year)', pass_user_data=True),
             ],
+            enums.ADMIN_STATISTICS_GENERAL_ORDER_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_statistics_general_order_select, pattern='^(page|back|select)', pass_user_data=True)
+            ],
             enums.ADMIN_STATISTICS_COURIERS: [
                 CallbackQueryHandler(admin_handlers.on_statistics_courier_select, pattern='^(back|page|select)',  pass_user_data=True)
             ],
             enums.ADMIN_STATISTICS_COURIERS_DATE: [
                 CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
                 CallbackQueryHandler(admin_handlers.on_statistics_couriers, pattern='^(back|day|month|year)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_COURIER_ORDER_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_statistics_courier_order_select, pattern='^(back|page|select)',
+                                     pass_user_data=True)
             ],
             enums.ADMIN_STATISTICS_LOCATIONS: [
                 CallbackQueryHandler(admin_handlers.on_statistics_locations_select, pattern='^(back|page|select)', pass_user_data=True)
@@ -231,13 +238,43 @@ def main():
                 CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
                 CallbackQueryHandler(admin_handlers.on_statistics_locations, pattern='^(back|year|month|day)', pass_user_data=True)
             ],
+            enums.ADMIN_STATISTICS_LOCATION_ORDER_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_statistics_locations_order_select, pattern='^(back|select|page)',
+                                     pass_user_data=True)
+            ],
             enums.ADMIN_STATISTICS_USERS: [
                 CallbackQueryHandler(admin_handlers.on_statistics_users, pattern='^(clients|back)', pass_user_data=True),
             ],
-            # enums.ADMIN_STATISTICS_USER_DATE: [
-            #     CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
-            #     CallbackQueryHandler(admin_handlers.on_statistics_user, pass_user_data=True)
-            # ],
+            enums.ADMIN_STATISTICS_USER_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_statistics_user_select, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_USER_SELECT_DATE: [
+                CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
+                CallbackQueryHandler(admin_handlers.on_statistics_user_select_date, pattern='^(back|year|month|day)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_USER_ORDER_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_statistics_user_order_select, pattern='^(back|select|page)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_TOP_CLIENTS: [
+                CallbackQueryHandler(admin_handlers.on_statistics_top_clients, pattern='^(back|top)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_TOP_CLIENTS_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_top_users_select, pattern='^(select|back)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_TOP_CLIENTS_PRODUCT: [
+                CallbackQueryHandler(admin_handlers.on_top_users_by_product, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_TOP_CLIENTS_LOCATION: [
+                CallbackQueryHandler(admin_handlers.on_top_users_by_location, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE: [
+                CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
+                CallbackQueryHandler(admin_handlers.on_top_by_date, pattern='^(back|year|month|day)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_TOP_CLIENTS_ORDER_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_statistics_top_clients_order_select, pattern='^(back|page|select)',
+                                     pass_user_data=True)
+            ],
             enums.ADMIN_BOT_SETTINGS: [
                 CallbackQueryHandler(admin_handlers.on_bot_settings_menu, pattern='^bot_settings', pass_user_data=True)
             ],

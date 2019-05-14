@@ -284,6 +284,26 @@ def statistics_users(_):
     return InlineKeyboardMarkup(buttons)
 
 
+def top_clients_order_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('By price'), callback_data='price')],
+        [InlineKeyboardButton(_('By orders'), callback_data='orders')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def top_clients_stats_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('🛍 By product'), callback_data='top_by_product')],
+        [InlineKeyboardButton(_('📆 By date'), callback_data='top_by_date')],
+        [InlineKeyboardButton(_('🎯 By location'), callback_data='top_by_location')],
+        [InlineKeyboardButton(_('🛒 Total orders'), callback_data='top_total_orders')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
 def order_select_time_keyboard(_):
     buttons = [
         [InlineKeyboardButton(_('⏰ Now'), callback_data='now')],
@@ -317,7 +337,7 @@ def time_picker_keyboard(_, hour=0, minute=0, cancel=False):
     return InlineKeyboardMarkup(buttons)
 
 
-def calendar_keyboard(year, month, _, cancel=False):
+def calendar_keyboard(year, month, _, cancel=False, first_date=None):
     markup = []
     row = []
     current_date = datetime.date.today()
@@ -340,13 +360,18 @@ def calendar_keyboard(year, month, _, cancel=False):
         row.append(InlineKeyboardButton(day, callback_data='calendar_ignore'))
     markup.append(row)
     my_calendar = calendar.monthcalendar(year, month)
+    year_month_bool = first_date and first_date.year == year and first_date.month == month
     for week in my_calendar:
         row = []
         for day in week:
             if (day == 0):
                 row.append(InlineKeyboardButton(" ", callback_data='calendar_ignore|'))
             else:
-                row.append(InlineKeyboardButton(str(day), callback_data='day|{}'.format(day)))
+                day_str = str(day)
+                if year_month_bool:
+                    if first_date.day == day:
+                        day_str = '✅ {}'.format(day_str)
+                row.append(InlineKeyboardButton(day_str, callback_data='day|{}'.format(day)))
         markup.append(row)
     markup.append([InlineKeyboardButton(_('↩ Back'), callback_data='back|')])
     if cancel:

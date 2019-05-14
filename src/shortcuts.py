@@ -132,10 +132,14 @@ def send_product_info(bot, product, chat_id, trans):
 def initialize_calendar(_, bot, user_data, chat_id, state, message_id=None, query_id=None, msg=None, cancel=False):
     current_date = datetime.date.today()
     year, month = current_date.year, current_date.month
+    try:
+        first_date = user_data['calendar']['first_date']
+    except KeyError:
+        first_date = None
     if not msg:
         msg = _('Pick year, month or day')
-    user_data['calendar'] = {'year': year, 'month': month, 'msg': msg, 'cancel': cancel, 'state': state}
-    reply_markup = keyboards.calendar_keyboard(year, month, _, cancel)
+    user_data['calendar'] = {'year': year, 'month': month, 'msg': msg, 'cancel': cancel, 'state': state, 'first_date': first_date}
+    reply_markup = keyboards.calendar_keyboard(year, month, _, cancel, first_date=first_date)
     if message_id:
         bot.edit_message_text(msg, chat_id, message_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     else:
@@ -186,32 +190,30 @@ def calculate_delivery_fee(delivery_method, location, total, is_vip):
     return 0
 
 
-
-
-def get_order_subquery(action, val, month, year):
-    val = int(val)
-    query = []
-    subquery = Order.date_created.year == year
-    query.append(subquery)
-    if action == 'year':
-        return query
-    query.append(Order.date_created.month == month)
-    if action == 'day':
-        query.append(Order.date_created.day == val)
+def get_order_subquery(first_date=None, second_date=None, year=None, month=None):
+    if first_date and second_date:
+        query = [Order.date_created >= first_date, Order.date_created <= second_date]
+    elif year and month:
+        query = [Order.date_created.year == year, Order.date_created.month == month]
+    elif year:
+        query = [Order.date_created.year == year]
+    else:
+        raise ValueError('Incorrect arguments')
     return query
 
 
-def get_order_count_and_price(*subqueries):
+def get_order_count_and_price(orders):
     _ = get_channel_trans()
     currency = get_currency_symbol()
-    orders = Order.select().where(*subqueries)
+    # orders = Order.select().where(*subqueries)
     orders_count = orders.count()
     total_price = 0
     products_count = {}
     stats_text = ''
     count_text = _('Count')
     price_text = _('Price')
-    orders_items = OrderItem.select().join(Order).where(*subqueries)
+    orders_ids = [order.id for order in orders]
+    orders_items = OrderItem.select().join(Order).where(Order.id.in_(orders_ids))
     for order_item in orders_items:
         total_price += order_item.total_price
         title, count, price = order_item.product.title, order_item.count, order_item.total_price

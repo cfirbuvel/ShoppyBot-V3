@@ -601,3 +601,20 @@ def enter_price_group_selected(_, bot, chat_id, group_id, msg_id=None, query_id=
     if query_id:
         bot.answer_callback_query(query_id)
     return enums.ADMIN_PRODUCT_PRICE_GROUP_SELECTED
+
+
+def enter_statistics_user_select(_, bot, chat_id, msg_id, query_id, page=1, msg=None):
+    if msg is None:
+        msg = _('Select user')
+    client_perms = [
+        UserPermission.AUTHORIZED_RESELLER, UserPermission.FRIEND, UserPermission.VIP_CLIENT,
+        UserPermission.CLIENT, UserPermission.NOT_REGISTERED, UserPermission.PENDING_REGISTRATION,
+        # comment out this
+        UserPermission.OWNER, UserPermission.COURIER
+    ]
+    users = User.select(User.username, User.id).join(UserPermission) \
+        .where(User.banned == False, UserPermission.permission.in_(client_perms)).tuples()
+    reply_markup = keyboards.general_select_one_keyboard(_, users, page)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    bot.answer_callback_query(query_id)
+    return enums.ADMIN_STATISTICS_USER_SELECT

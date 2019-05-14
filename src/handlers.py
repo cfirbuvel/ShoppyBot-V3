@@ -1087,10 +1087,27 @@ def on_my_order_date(bot, update, user_data):
         return enums.BOT_MY_ORDERS
     elif action in ('day', 'month', 'year'):
         year, month = user_data['calendar']['year'], user_data['calendar']['month']
-        queries = shortcuts.get_order_subquery(action, val, month, year)
+        if action == 'day':
+            day = int(val)
+            first_date = user_data['calendar'].get('first_date')
+            if not first_date:
+                first_date = datetime.date(year=year, month=month, day=day)
+                user_data['calendar']['first_date'] = first_date
+                state = enums.BOT_MY_ORDERS_DATE
+                return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+            else:
+                second_date = datetime.date(year=year, month=month, day=day)
+                if first_date > second_date:
+                    query.answer(_('Second date could not be before first date'), show_alert=True)
+                    return enums.BOT_MY_ORDERS_DATE
+                del user_data['calendar']
+                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+        elif action == 'year':
+            date_query = shortcuts.get_order_subquery(year=year)
+        else:
+            date_query = shortcuts.get_order_subquery(month=month, year=year)
         user = User.get(telegram_id=user_id)
-        queries.append(Order.user == user)
-        orders = Order.select().where(*queries)
+        orders = Order.select().where(Order.user == user, *date_query)
         if len(orders) == 1:
             order = orders[0]
             msg = _('Order №{}').format(order.id)
@@ -1774,7 +1791,7 @@ def on_calendar_change(bot, update, user_data):
             msg = calendar_data['msg']
             user_data['calendar']['year'] = year
             user_data['calendar']['month'] = month
-            reply_markup = keyboards.calendar_keyboard(year, month, _, calendar_data['cancel'])
+            reply_markup = keyboards.calendar_keyboard(year, month, _, calendar_data['cancel'], calendar_data['first_date'])
             bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
             query.answer()
             return state

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal, InvalidOperation
 import threading
 
@@ -7,6 +7,7 @@ from telegram import ReplyKeyboardRemove
 from telegram.error import TelegramError
 from telegram.ext import ConversationHandler
 from telegram.utils.helpers import escape_markdown, escape
+from peewee import fn
 
 from . import enums, keyboards, shortcuts, messages, states
 from . import shortcuts
@@ -22,7 +23,7 @@ from .models import Product, ProductCount, Location, ProductWarehouse, User, \
     ProductMedia, ProductCategory, IdentificationStage, Order, IdentificationQuestion, \
     ChannelMessageData, GroupProductCount, delete_db, create_tables, Currencies, BitcoinCredentials, \
     Channel, UserPermission, ChannelPermissions, CourierLocation, WorkingHours, GroupProductCountPermission, \
-    OrderBtcPayment, CurrencyRates, BtcProc
+    OrderBtcPayment, CurrencyRates, BtcProc, OrderItem
 
 
 def on_cmd_add_product(bot, update):
@@ -100,13 +101,12 @@ def on_statistics_menu(bot, update, user_data):
                                   text=msg, reply_markup=reply_markup)
             query.answer()
             return enums.ADMIN_STATISTICS_LOCATIONS
-    elif action == 'stats_user':
+    elif action == 'stats_users':
         msg = _('🌝 Statistics by users')
         reply_markup = keyboards.statistics_users(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_STATISTICS_USERS
-
 
 @user_passes
 def on_statistics_general(bot, update, user_data):
@@ -125,23 +125,92 @@ def on_statistics_general(bot, update, user_data):
         return enums.ADMIN_STATISTICS
     elif action in ('day', 'year', 'month'):
         year, month = user_data['calendar']['year'], user_data['calendar']['month']
-        subquery = shortcuts.get_order_subquery(action, val, month, year)
-        db_query = Order.status.in_((Order.DELIVERED, Order.FINISHED))
-        count, price, product_text = shortcuts.get_order_count_and_price(db_query, *subquery)
-        db_query = Order.status == Order.CANCELLED
-        cancel_count, cancel_price, cancel_product_text = shortcuts.get_order_count_and_price(db_query, *subquery)
-        message = _('✅ *Total confirmed orders*\nCount: {}\n{}\n*Total cost: {}*').format(
+        if action == 'day':
+            day = int(val)
+            first_date = user_data['calendar'].get('first_date')
+            if not first_date:
+                first_date = date(year=year, month=month, day=day)
+                user_data['calendar']['first_date'] = first_date
+                state = enums.ADMIN_STATISTICS_GENERAL
+                return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+            else:
+                second_date = date(year=year, month=month, day=day)
+                if first_date > second_date:
+                    query.answer(_('Second date could not be before first date'), show_alert=True)
+                    return enums.ADMIN_STATISTICS_GENERAL
+                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+                user_data['stats'] = {'first_date': first_date, 'second_date': second_date}
+        elif action == 'year':
+            date_query = shortcuts.get_order_subquery(year=year)
+            user_data['stats'] = {'year': year}
+        else:
+            date_query = shortcuts.get_order_subquery(month=month, year=year)
+            user_data['stats'] = {'month': month, 'year': year}
+        print(date_query)
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)), *date_query)
+        count, price, product_text = shortcuts.get_order_count_and_price(orders)
+        orders = Order.select().where(Order.status == Order.CANCELLED, *date_query)
+        cancel_count, cancel_price, cancel_product_text = shortcuts.get_order_count_and_price(orders)
+        msg = _('✅ *Total confirmed orders*\nCount: {}\n{}\n*Total cost: {}*').format(
             count, product_text, price)
-        message += '\n\n'
-        message += _('❌ *Total canceled orders*\nCount: {}\n{}\n*Total cost: {}*').format(
+        msg += '\n\n'
+        msg += _('❌ *Total canceled orders*\nCount: {}\n{}\n*Total cost: {}*').format(
             cancel_count, cancel_product_text, cancel_price)
-        bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=message,
-                              reply_markup=keyboards.statistics_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)), *date_query)\
+            .order_by(Order.date_created.desc())
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in orders]
+        page = 1
+        user_data['order_listing_page'] = page
+        user_data['stats']['msg'] = msg
+        reply_markup = keyboards.general_select_one_keyboard(_, orders)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
-        return enums.ADMIN_STATISTICS
+        return enums.ADMIN_STATISTICS_GENERAL_ORDER_SELECT
     else:
         return states.enter_unknown_command(_, bot, query)
+
+
+@user_passes
+def on_statistics_general_order_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    action, val = query.data.split('|')
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    if action in ('page', 'select'):
+        stats_data = user_data['stats']
+        year, month = stats_data.get('year'), stats_data.get('month')
+        first_date, second_date = stats_data.get('first_date'), stats_data.get('second_date')
+        date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)), *date_query) \
+            .order_by(Order.date_created.desc())
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        if action == 'page':
+            page = int(val)
+            user_data['order_listing_page'] = page
+            msg = stats_data['msg']
+        else:
+            page = user_data['order_listing_page']
+            order = Order.get(id=val)
+            try:
+                btc_data = OrderBtcPayment.get(order=order)
+            except OrderBtcPayment.DoesNotExist:
+                btc_data = None
+            msg = messages.create_service_notice(_, order, btc_data)
+            user_data['stats']['msg'] = msg
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_GENERAL_ORDER_SELECT
+    else:
+        del user_data['order_listing_page']
+        del user_data['calendar']
+        state = enums.ADMIN_STATISTICS_GENERAL
+        shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+        return state
 
 
 @user_passes
@@ -172,12 +241,13 @@ def on_statistics_courier_select(bot, update, user_data):
         query.answer()
         return enums.ADMIN_STATISTICS_COURIERS
     else:
-        user_data['statistics'] = {'courier_id': val}
+        user_data['stats'] = {'id': val}
         state = enums.ADMIN_STATISTICS_COURIERS_DATE
         shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
         return state
 
 
+@user_passes
 def on_statistics_couriers(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -185,14 +255,42 @@ def on_statistics_couriers(bot, update, user_data):
     action, val = query.data.split('|')
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action == 'back':
+        del user_data['stats']
         msg = _('Select a courier:')
+        page = user_data['listing_page']
+        couriers = User.select(User.username, User.id).join(UserPermission) \
+            .where(User.banned == False, UserPermission.permission == UserPermission.COURIER).tuples()
+        reply_markup = keyboards.general_select_one_keyboard(_, couriers, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_COURIERS
     else:
-        courier_id = user_data['statistics']['courier_id']
+        courier_id = user_data['stats']['id']
         courier = User.get(id=courier_id)
         year, month = user_data['calendar']['year'], user_data['calendar']['month']
-        subquery = shortcuts.get_order_subquery(action, val, month, year)
-        status_query = Order.status.in_((Order.DELIVERED, Order.FINISHED))
-        count, price, product_text = shortcuts.get_order_count_and_price(status_query, Order.courier == courier, *subquery)
+        if action == 'day':
+            day = int(val)
+            first_date = user_data['calendar'].get('first_date')
+            if not first_date:
+                first_date = date(year=year, month=month, day=day)
+                user_data['calendar']['first_date'] = first_date
+                state = enums.ADMIN_STATISTICS_COURIERS_DATE
+                return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+            else:
+                second_date = date(year=year, month=month, day=day)
+                if first_date > second_date:
+                    query.answer(_('Second date could not be before first date'), show_alert=True)
+                    return enums.ADMIN_STATISTICS_COURIERS_DATE
+                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+                user_data['stats'] = {'first_date': first_date, 'second_date': second_date}
+        elif action == 'year':
+            date_query = shortcuts.get_order_subquery(year=year)
+            user_data['stats'] = {'year': year}
+        else:
+            date_query = shortcuts.get_order_subquery(month=month, year=year)
+            user_data['stats'] = {'month': month, 'year': year}
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)), Order.courier == courier, *date_query)
+        count, price, product_text = shortcuts.get_order_count_and_price(orders)
         courier_username = escape_markdown(courier.username)
         msg = _('*✅ Total confirmed orders for Courier* @{}\nCount: {}\n{}\n*Total cost: {}*').format(
             courier_username, count, product_text, price)
@@ -206,17 +304,73 @@ def on_statistics_couriers(bot, update, user_data):
                 count = 0
             msg += '\n'
             msg += '{}: {} credits'.format(product.title, count)
-    page = user_data['listing_page']
-    couriers = User.select(User.username, User.id).join(UserPermission)\
-        .where(User.banned == False, UserPermission.permission == UserPermission.COURIER).tuples()
-    reply_markup = keyboards.general_select_one_keyboard(_, couriers, page)
-    bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=msg,
-                          reply_markup=reply_markup,
-                          parse_mode=ParseMode.MARKDOWN)
-    query.answer()
-    return enums.ADMIN_STATISTICS_COURIERS
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)), Order.courier == courier,
+                                      *date_query).order_by(Order.date_created.desc())
+        user_data['stats']['id'] = courier_id
+        user_data['stats']['msg'] = msg
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        page = 1
+        user_data['order_listing_page'] = page
+        user_data['stats']['msg'] = msg
+        reply_markup = keyboards.general_select_one_keyboard(_, orders)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_COURIER_ORDER_SELECT
 
 
+@user_passes
+def on_statistics_courier_order_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    action, val = query.data.split('|')
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    if action in ('page', 'select'):
+        stats_data = user_data['stats']
+        year, month = stats_data.get('year'), stats_data.get('month')
+        first_date, second_date = stats_data.get('first_date'), stats_data.get('second_date')
+        date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
+        courier_id = user_data['stats']['id']
+        courier = User.get(id=courier_id)
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+                                      Order.courier == courier, *date_query).order_by(Order.date_created.desc())
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        if action == 'page':
+            page = int(val)
+            user_data['order_listing_page'] = page
+            msg = stats_data['msg']
+        else:
+            page = user_data['order_listing_page']
+            order = Order.get(id=val)
+            try:
+                btc_data = OrderBtcPayment.get(order=order)
+            except OrderBtcPayment.DoesNotExist:
+                btc_data = None
+            msg = messages.create_service_notice(_, order, btc_data)
+            user_data['stats']['msg'] = msg
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_COURIER_ORDER_SELECT
+    else:
+        del user_data['calendar']
+        state = enums.ADMIN_STATISTICS_COURIERS_DATE
+        return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+        # msg = _('Select a courier:')
+        # page = user_data['listing_page']
+        # couriers = User.select(User.username, User.id).join(UserPermission) \
+        #     .where(User.banned == False, UserPermission.permission == UserPermission.COURIER).tuples()
+        # reply_markup = keyboards.general_select_one_keyboard(_, couriers, page)
+        # bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup,)
+        # query.answer()
+        # return enums.ADMIN_STATISTICS_COURIERS
+
+
+@user_passes
 def on_statistics_locations_select(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -241,12 +395,13 @@ def on_statistics_locations_select(bot, update, user_data):
         query.answer()
         return enums.ADMIN_STATISTICS_LOCATIONS
     else:
-        user_data['statistics'] = {'location_id': val}
+        user_data['stats'] = {'id': val}
         state = enums.ADMIN_STATISTICS_LOCATIONS_DATE
         shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
         return state
 
 
+@user_passes
 def on_statistics_locations(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -254,25 +409,105 @@ def on_statistics_locations(bot, update, user_data):
     action, val = query.data.split('|')
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action in ('day', 'month', 'year'):
-        location_id = user_data['statistics']['location_id']
+        location_id = user_data['stats']['id']
         location = Location.get(id=location_id)
         year, month = user_data['calendar']['year'], user_data['calendar']['month']
-        subquery = shortcuts.get_order_subquery(action, val, month, year)
-        status_query = Order.status.in_((Order.DELIVERED, Order.FINISHED))
-        count, price, product_text = shortcuts.get_order_count_and_price(status_query, Order.location == location, *subquery)
+        if action == 'day':
+            day = int(val)
+            first_date = user_data['calendar'].get('first_date')
+            if not first_date:
+                first_date = date(year=year, month=month, day=day)
+                user_data['calendar']['first_date'] = first_date
+                state = enums.ADMIN_STATISTICS_LOCATIONS_DATE
+                return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+            else:
+                second_date = date(year=year, month=month, day=day)
+                if first_date > second_date:
+                    query.answer(_('Second date could not be before first date'), show_alert=True)
+                    return enums.ADMIN_STATISTICS_LOCATIONS_DATE
+                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+                user_data['stats'] = {'first_date': first_date, 'second_date': second_date}
+        elif action == 'year':
+            date_query = shortcuts.get_order_subquery(year=year)
+            user_data['stats'] = {'year': year}
+        else:
+            date_query = shortcuts.get_order_subquery(month=month, year=year)
+            user_data['stats'] = {'month': month, 'year': year}
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)),
+                                      Order.location == location, *date_query)
+        count, price, product_text = shortcuts.get_order_count_and_price(orders)
         location_title = escape_markdown(location.title)
         msg = _('✅ *Total confirmed orders for Location* `{}`\nCount: {}\n{}\n*Total cost: {}*').format(
             location_title, count, product_text, price)
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+                                      Order.location == location, *date_query).order_by(Order.date_created.desc())
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        user_data['stats']['id'] = location_id
+        user_data['stats']['msg'] = msg
+        page = 1
+        user_data['order_listing_page'] = page
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_LOCATION_ORDER_SELECT
     else:
         msg = _('Select location:')
-    locations = Location.select(Location.title, Location.id).tuples()
-    page = user_data['listing_page']
-    reply_markup = keyboards.general_select_one_keyboard(_, locations, page)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    query.answer()
-    return enums.ADMIN_STATISTICS_LOCATIONS
+        locations = Location.select(Location.title, Location.id).tuples()
+        page = user_data['listing_page']
+        reply_markup = keyboards.general_select_one_keyboard(_, locations, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_LOCATIONS
 
 
+@user_passes
+def on_statistics_locations_order_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    action, val = query.data.split('|')
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    if action in ('select', 'page'):
+        print('1')
+        stats_data = user_data['stats']
+        year, month = stats_data.get('year'), stats_data.get('month')
+        first_date, second_date = stats_data.get('first_date'), stats_data.get('second_date')
+        date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
+        loc_id = stats_data['id']
+        location = Location.get(id=loc_id)
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+                                      Order.location == location, *date_query).order_by(Order.date_created.desc())
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        print('2')
+        if action == 'page':
+            page = int(val)
+            user_data['order_listing_page'] = page
+            msg = stats_data['msg']
+        else:
+            page = user_data['order_listing_page']
+            order = Order.get(id=val)
+            try:
+                btc_data = OrderBtcPayment.get(order=order)
+            except OrderBtcPayment.DoesNotExist:
+                btc_data = None
+            msg = messages.create_service_notice(_, order, btc_data)
+            user_data['stats']['msg'] = msg
+        print('3')
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_LOCATION_ORDER_SELECT
+    else:
+        del user_data['calendar']
+        state = enums.ADMIN_STATISTICS_LOCATIONS_DATE
+        return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+
+
+@user_passes
 def on_statistics_users(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
@@ -287,64 +522,520 @@ def on_statistics_users(bot, update, user_data):
         query.answer()
         return enums.ADMIN_STATISTICS
     elif action == 'clients_top':
-        pass
-    elif action == 'clients_select':
-        client_perms = [
-            UserPermission.AUTHORIZED_RESELLER, UserPermission.FRIEND, UserPermission.VIP_CLIENT,
-            UserPermission.CLIENT, UserPermission.NOT_REGISTERED, UserPermission.PENDING_REGISTRATION
-        ]
-        users = User.select(User.username, User.id).join(UserPermission)\
-            .where(User.banned == False, UserPermission.permission.in_(client_perms)).tuples()
-        msg = _('Select user')
+        msg = _('🥇 Top clients')
+        reply_markup = keyboards.top_clients_stats_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS
+    elif action == 'clients_all':
         page = 1
         user_data['listing_page'] = page
-        reply_markup = keyboards.general_select_one_keyboard(_, users, page)
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
-        return enums.ADMIN_STATISTICS_USER_SELECT
+        return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id)
 
 
-# def on
-
-
-def on_statistics_user(bot, update, user_data):
+@user_passes
+def on_statistics_user_select(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
     action, val = query.data.split('|')
-    chat_id, message_id = query.message.chat_id, query.message.message_id
-    try:
-        user_ids = user_data['statistics']['users_ids']
-    except KeyError:
-        action = 'back'
     if action == 'back':
-        msg = _('Enter username:')
-        bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=msg, reply_markup=cancel_button(_))
+        del user_data['listing_page']
+        msg = _('🌝 Statistics by users')
+        reply_markup = keyboards.statistics_users(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         return enums.ADMIN_STATISTICS_USERS
-    elif action == 'ignore':
-        return enums.ADMIN_STATISTICS_USER_DATE
+    elif action == 'page':
+        page = int(val)
+        user_data['listing_page'] = page
+        return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id, page)
     else:
-        users = User.filter(User.id.in_(user_ids))
-        text = ''
-        year, month = user_data['calendar_date']
-        subquery = shortcuts.get_order_subquery(action, val, month, year)
-        for user in users:
-            count, price, product_text = shortcuts.get_order_count_and_price((Order.delivered == True),
-                                                                             (Order.canceled == False),
-                                                                             (Order.user == user), *subquery)
-            cancel_count, cancel_price, cancel_product_text = shortcuts.get_order_count_and_price(
-                (Order.canceled == True), *subquery)
-            username = escape(user.username)
-            message = _('✅ <b>Total confirmed orders for client</b> @{}\nCount: {}\n<b>Total cost: {}₪</b>').format(
-                username, count, price)
-            message += '\n\n'
-            message += _('❌ <b>Total canceled orders for client</b>\nCount: {}\n<b>Total cost: {}₪</b>').format(
-                cancel_count, cancel_price)
-            text += message
-        bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text,
-                              reply_markup=statistics_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
+        user_data['stats'] = {'id': val}
+        state = enums.ADMIN_STATISTICS_USER_SELECT_DATE
+        shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+        return state
+
+
+@user_passes
+def on_statistics_user_select_date(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action in ('day', 'year', 'month'):
+        user_id = user_data['stats']['id']
+        user = User.get(id=user_id)
+        year, month = user_data['calendar']['year'], user_data['calendar']['month']
+        if action == 'day':
+            day = int(val)
+            first_date = user_data['calendar'].get('first_date')
+            if not first_date:
+                first_date = date(year=year, month=month, day=day)
+                user_data['calendar']['first_date'] = first_date
+                state = enums.ADMIN_STATISTICS_USER_SELECT_DATE
+                return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+            else:
+                second_date = date(year=year, month=month, day=day)
+                if first_date > second_date:
+                    query.answer(_('Second date could not be before first date'), show_alert=True)
+                    return enums.ADMIN_STATISTICS_USER_SELECT_DATE
+                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+                user_data['stats'] = {'first_date': first_date, 'second_date': second_date}
+        elif action == 'year':
+            date_query = shortcuts.get_order_subquery(year=year)
+            user_data['stats'] = {'year': year}
+        else:
+            date_query = shortcuts.get_order_subquery(month=month, year=year)
+            user_data['stats'] = {'month': month, 'year': year}
+        confirmed_orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)),
+                                      Order.user == user, *date_query)
+        count, price, product_text = shortcuts.get_order_count_and_price(confirmed_orders)
+        cancelled_orders = Order.select().where(Order.status == Order.CANCELLED,Order.user == user, *date_query)
+        username = escape_markdown(user.username)
+        cancel_count, cancel_price, cancel_product_text = shortcuts.get_order_count_and_price(cancelled_orders)
+        msg = _('✅ *Total confirmed orders for client* @{}\nCount: {}\n{}\n*Total cost: {}*').format(username, count,
+                                                                                                     product_text,
+                                                                                                     price)
+        msg += '\n\n'
+        msg += _('❌ *Total canceled orders for client* @{}\nCount: {}\n{}\n*Total cost: {}*').format(username,
+                                                                                                     cancel_count,
+                                                                                                     cancel_product_text,
+                                                                                                     cancel_price)
+        date_format = '%d-%m-%Y'
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+                                      Order.user == user, *date_query)
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        user_data['stats']['id'] = user_id
+        user_data['stats']['msg'] = msg
+        page = 1
+        user_data['order_listing_page'] = page
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
-        return enums.ADMIN_STATISTICS
+        return enums.ADMIN_STATISTICS_USER_ORDER_SELECT
+    else:
+        page = user_data['listing_page']
+        return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id, page)
+
+
+@user_passes
+def on_statistics_user_order_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action in ('page', 'select'):
+        stats_data = user_data['stats']
+        year, month = stats_data.get('year'), stats_data.get('month')
+        first_date, second_date = stats_data.get('first_date'), stats_data.get('second_date')
+        date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
+        user_id = stats_data['id']
+        user = User.get(id=user_id)
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+                                      Order.user == user, *date_query).order_by(Order.date_created.desc())
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        if action == 'page':
+            page = int(val)
+            user_data['order_listing_page'] = page
+            msg = stats_data['msg']
+        else:
+            page = user_data['order_listing_page']
+            order = Order.get(id=val)
+            try:
+                btc_data = OrderBtcPayment.get(order=order)
+            except OrderBtcPayment.DoesNotExist:
+                btc_data = None
+            msg = messages.create_service_notice(_, order, btc_data)
+            user_data['stats']['msg'] = msg
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_USER_ORDER_SELECT
+    else:
+        del user_data['calendar']
+        state = enums.ADMIN_STATISTICS_USER_SELECT_DATE
+        shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+        return state
+
+
+@user_passes
+def on_statistics_top_clients(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    if action == 'back':
+        del user_data['top_clients']
+        msg = _('🌝 Statistics by users')
+        reply_markup = keyboards.statistics_users(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        return enums.ADMIN_STATISTICS_USERS
+    page = 1
+    user_data['listing_page'] = page
+    user_data['top_clients'] = {}
+    if action == 'top_by_product':
+        products = Product.select(Product.title, Product.id).tuples()
+        msg = _('Select a product')
+        reply_markup = keyboards.general_select_one_keyboard(_, products, page)
+        state = enums.ADMIN_STATISTICS_TOP_CLIENTS_PRODUCT
+    elif action == 'top_by_date':
+        state = enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE
+        return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+    elif action == 'top_by_location':
+        locations = Location.select(Location.title, Location.id).tuples()
+        msg = _('Select location')
+        reply_markup = keyboards.general_select_one_keyboard(_, locations, page)
+        state = enums.ADMIN_STATISTICS_TOP_CLIENTS_LOCATION
+    else:
+        top_users = User.select(User.username, User.id, fn.COUNT(Order.id)).join(Order, on=Order.user)\
+            .where(Order.status.in_((Order.DELIVERED, Order.FINISHED)))\
+                   .group_by(User).order_by(fn.COUNT(Order.id).desc()).tuples()
+        rank = 1
+        users = []
+        for username, id, count in top_users:
+            title = '{}. {} - {}'.format(rank, username, count)
+            rank += 1
+            users.append((title, id))
+            if rank == 10:
+                break
+        msg = _('🛒 Total orders')
+        user_data['top_clients']['type'] = 'total_orders'
+        reply_markup = keyboards.general_select_one_keyboard(_, users)
+        state = enums.ADMIN_STATISTICS_TOP_CLIENTS_SELECT
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    return state
+
+
+@user_passes
+def on_top_users_by_product(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'page':
+        page = int(val)
+        user_data['listing_page'] = page
+        products = Product.select(Product.title, Product.id)
+        msg = _('Select a product')
+        reply_markup = keyboards.general_select_one_keyboard(_, products, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_PRODUCT
+    elif action == 'select':
+        user_data['top_clients']['type'] = 'product'
+        product_id = int(val)
+        user_data['top_clients']['id'] = product_id
+        product = Product.get(id=product_id)
+        currency = get_currency_symbol()
+        top_users = User.select(User.username, User.id, fn.SUM(OrderItem.total_price)).join(Order, on=Order.user)\
+            .join(OrderItem).where(OrderItem.product == product, Order.status.in_((Order.FINISHED, Order.DELIVERED)))\
+            .group_by(User).order_by(fn.SUM(OrderItem.total_price).desc()).tuples()
+        rank = 1
+        print(list(top_users))
+        users = []
+        for username, id, total in top_users:
+            title = '{}. {} - {}{}'.format(rank, username, total, currency)
+            rank += 1
+            users.append((title, id))
+            if rank == 10:
+                break
+        reply_markup = keyboards.general_select_one_keyboard(_, users)
+        msg = _('🛍 By product')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_SELECT
+    else:
+        del user_data['listing_page']
+        msg = _('🥇 Top clients')
+        reply_markup = keyboards.top_clients_stats_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS
+
+
+@user_passes
+def on_top_users_by_location(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'page':
+        page = int(val)
+        user_data['listing_page'] = page
+        locations = Location.select(Product.title, Product.id)
+        msg = _('Select location')
+        reply_markup = keyboards.general_select_one_keyboard(_, locations, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_PRODUCT
+    elif action == 'select':
+        user_data['top_clients']['type'] = 'location'
+        currency = get_currency_symbol()
+        loc_id = int(val)
+        user_data['top_clients']['id'] = loc_id
+        location = Location.get(id=loc_id)
+        top_users = User.select(User.username, User.id, fn.SUM(Order.total_cost)).join(Order, on=Order.user)\
+            .where(Order.location == location, Order.status.in_((Order.DELIVERED, Order.FINISHED))).group_by(User)\
+            .order_by(fn.SUM(Order.total_cost).desc()).tuples()
+        rank = 1
+        print(list(top_users))
+        users = []
+        for username, id, total in top_users:
+            title = '{}. {} - {}{}'.format(rank, username, total, currency)
+            rank += 1
+            users.append((title, id))
+            if rank == 10:
+                break
+        reply_markup = keyboards.general_select_one_keyboard(_, users)
+        msg = _('🎯 By location')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_SELECT
+    else:
+        del user_data['listing_page']
+        msg = _('🥇 Top clients')
+        reply_markup = keyboards.top_clients_stats_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS
+
+
+@user_passes
+def on_top_by_date(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'back':
+        msg = _('🥇 Top clients')
+        reply_markup = keyboards.top_clients_stats_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS
+    elif action in ('year', 'month', 'day'):
+        year, month = user_data['calendar']['year'], user_data['calendar']['month']
+        if action == 'day':
+            day = int(val)
+            first_date = user_data['calendar'].get('first_date')
+            if not first_date:
+                first_date = date(year=year, month=month, day=day)
+                user_data['calendar']['first_date'] = first_date
+                state = enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE
+                return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+            else:
+                second_date = date(year=year, month=month, day=day)
+                if first_date > second_date:
+                    query.answer(_('Second date could not be before first date'), show_alert=True)
+                    return enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE
+                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+                user_data['top_clients']['first_date'] = first_date
+                user_data['top_clients']['second_date'] = second_date
+        elif action == 'year':
+            date_query = shortcuts.get_order_subquery(year=year)
+            user_data['top_clients']['year'] = year
+        else:
+            date_query = shortcuts.get_order_subquery(month=month, year=year)
+            user_data['top_clients']['year'] = year
+            user_data['top_clients']['month'] = month
+        top_users = User.select(User.username, User.id, fn.SUM(Order.total_cost)).join(Order, on=Order.user)\
+            .where(Order.status.in_((Order.DELIVERED, Order.FINISHED)), *date_query).group_by(User).order_by(fn.SUM(Order.total_cost).desc()).tuples()
+        currency = get_currency_symbol()
+        rank = 1
+        users = []
+        for username, id, total in top_users:
+            title = '{}. {} - {}{}'.format(rank, username, total, currency)
+            rank += 1
+            users.append((title, id))
+            if rank == 10:
+                break
+        user_data['top_clients']['type'] = 'date'
+        msg = _('📆 By date')
+        reply_markup = keyboards.general_select_one_keyboard(_, users)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_SELECT
+
+
+@user_passes
+def on_top_users_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    top_data = user_data['top_clients']
+    top_category = top_data['type']
+    if action == 'select':
+        user = User.get(id=val)
+        db_query = [Order.user == user, Order.status.in_((Order.FINISHED, Order.DELIVERED))]
+        if top_category == 'product':
+            product = Product.get(id=top_data['id'])
+            orders = Order.select().join(OrderItem).where(OrderItem.product == product, *db_query)
+        elif top_category == 'date':
+            first_date, second_date, = top_data.get('first_date'), top_data.get('second_date')
+            year, month = top_data.get('year'), top_data.get('month')
+            date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
+            db_query += date_query
+            orders = Order.select().where(*db_query)
+        elif top_category == 'location':
+            location = Location.get(id=top_data['id'])
+            orders = Order.select().where(Order.location == location, *db_query)
+        else:
+            orders = Order.select().where(*db_query)
+        count, total_price, stats_text = shortcuts.get_order_count_and_price(orders)
+        username = escape_markdown(user.username)
+        msg = _('✅ *Total confirmed orders for client* @{}\nCount: {}\n{}\n*Total cost: {}*').format(username, count,
+                                                                                                     stats_text,
+                                                                                                     total_price)
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        page = 1
+        user_data['order_listing_page'] = page
+        user_data['top_clients']['msg'] = msg
+        user_data['top_clients']['user_id'] = val
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_ORDER_SELECT
+    else:
+        if top_category == 'product':
+            page = user_data['listing_page']
+            items = Product.select(Product.title, Product.id).tuples()
+            msg = _('Select a product')
+            reply_markup = keyboards.general_select_one_keyboard(_, items, page)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return enums.ADMIN_STATISTICS_TOP_CLIENTS_PRODUCT
+        elif top_category == 'date':
+            state = enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE
+            return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+        elif top_category == 'location':
+            page = user_data['listing_page']
+            items = Location.select(Location.title, Location.id).tuples()
+            msg = _('Select location')
+            reply_markup = keyboards.general_select_one_keyboard(_, items, page)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return enums.ADMIN_STATISTICS_TOP_CLIENTS_LOCATION
+        else:
+            msg = _('🥇 Top clients')
+            reply_markup = keyboards.top_clients_stats_keyboard(_)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            query.answer()
+            return enums.ADMIN_STATISTICS_TOP_CLIENTS
+
+
+@user_passes
+def on_statistics_top_clients_order_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    top_data = user_data['top_clients']
+    top_category = top_data['type']
+    if action in ('page', 'select'):
+        user = User.get(id=top_data['user_id'])
+        db_query = [Order.user == user, Order.status.in_((Order.FINISHED, Order.DELIVERED))]
+        if top_category == 'product':
+            product = Product.get(id=top_data['id'])
+            orders = Order.select().join(OrderItem).where(OrderItem.product == product, *db_query)
+        elif top_category == 'date':
+            first_date, second_date, = top_data.get('first_date'), top_data.get('second_date')
+            year, month = top_data.get('year'), top_data.get('month')
+            date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
+            db_query += date_query
+            orders = Order.select().where(*db_query)
+        elif top_category == 'location':
+            location = Location.get(id=top_data['id'])
+            orders = Order.select().where(Order.location == location, *db_query)
+        else:
+            orders = Order.select().where(*db_query)
+        if action == 'page':
+            msg = top_data['msg']
+            page = int(val)
+            user_data['listing_page'] = page
+        else:
+            order = Order.get(id=val)
+            try:
+                btc_data = OrderBtcPayment.get(order=order)
+            except OrderBtcPayment.DoesNotExist:
+                btc_data = None
+            msg = messages.create_service_notice(_, order, btc_data)
+            page = user_data['order_listing_page']
+            user_data['top_clients']['msg'] = msg
+        date_format = '%d-%m-%Y'
+        orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
+                  orders]
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_ORDER_SELECT
+    else:
+        currency = get_currency_symbol()
+        if top_category == 'product':
+            product_id = top_data['id']
+            product = Product.get(id=product_id)
+            top_users = User.select(User.username, User.id, fn.SUM(OrderItem.total_price)).join(Order, on=Order.user) \
+                .join(OrderItem).where(OrderItem.product == product,
+                                       Order.status.in_((Order.FINISHED, Order.DELIVERED))) \
+                .group_by(User).order_by(fn.SUM(OrderItem.total_price).desc()).tuples()
+            rank = 1
+            users = []
+            for username, id, total in top_users:
+                title = '{}. {} - {}{}'.format(rank, username, total, currency)
+                rank += 1
+                users.append((title, id))
+                if rank == 10:
+                    break
+            msg = _('🛍 By product')
+        elif top_category == 'date':
+            del user_data['calendar']
+            state = enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE
+            return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+        elif top_category == 'location':
+            loc_id = top_data['id']
+            location = Location.get(id=loc_id)
+            top_users = User.select(User.username, User.id, fn.SUM(Order.total_cost)).join(Order, on=Order.user) \
+                .where(Order.location == location, Order.status.in_((Order.DELIVERED, Order.FINISHED))).group_by(User) \
+                .order_by(fn.SUM(Order.total_cost).desc()).tuples()
+            rank = 1
+            users = []
+            for username, id, total in top_users:
+                title = '{}. {} - {}{}'.format(rank, username, total, currency)
+                rank += 1
+                users.append((title, id))
+                if rank == 10:
+                    break
+            msg = _('🎯 By location')
+        else:
+            top_users = User.select(User.username, User.id, fn.COUNT(Order.id)).join(Order, on=Order.user) \
+                .where(Order.status.in_((Order.DELIVERED, Order.FINISHED))) \
+                .group_by(User).order_by(fn.COUNT(Order.id).desc()).tuples()
+            rank = 1
+            users = []
+            for username, id, count in top_users:
+                title = '{}. {} - {}'.format(rank, username, count)
+                rank += 1
+                users.append((title, id))
+                if rank == 10:
+                    break
+            msg = _('🛒 Total orders')
+        del user_data['order_listing_page']
+        page = user_data['listing_page']
+        reply_markup = keyboards.general_select_one_keyboard(_, users, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_TOP_CLIENTS_SELECT
 
 
 @user_passes
@@ -469,7 +1160,6 @@ def on_courier_detail(bot, update, user_data):
         courier_locs = Location.select().join(CourierLocation)\
             .where(CourierLocation.user == courier)
         courier_locs = [loc.id for loc in courier_locs]
-        print(courier_locs)
         all_locs = []
         for loc in Location.select():
             is_picked = True if loc.id in courier_locs else False
@@ -1551,23 +2241,40 @@ def on_admin_orders_finished_date(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     action, val = query.data.split('|')
-    chat_id = query.message.chat_id
-    message_id = query.message.message_id
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action == 'back':
-        bot.edit_message_text(_('📖 Orders'), chat_id, message_id,
+        bot.edit_message_text(_('📖 Orders'), chat_id, msg_id,
                               reply_markup=keyboards.bot_orders_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_ORDERS
     elif action in ('day', 'month', 'year'):
         year, month = user_data['calendar']['year'], user_data['calendar']['month']
-        queries = shortcuts.get_order_subquery(action, val, month, year)
-        orders = Order.select().where(Order.status == Order.FINISHED, *queries)
-        # orders = orders.select().where(Order.status == Order.FINISHED)
+        if action == 'day':
+            day = int(val)
+            first_date = user_data['calendar'].get('first_date')
+            if not first_date:
+                first_date = date(year=year, month=month, day=day)
+                user_data['calendar']['first_date'] = first_date
+                state = enums.ADMIN_ORDERS_FINISHED_DATE
+                return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
+            else:
+                second_date = date(year=year, month=month, day=day)
+                if first_date > second_date:
+                    query.answer(_('Second date could not be before first date'), show_alert=True)
+                    return enums.ADMIN_ORDERS_FINISHED_DATE
+                del user_data['calendar']
+                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+                user_data['stats'] = {'first_date': first_date, 'second_date': second_date}
+        elif action == 'year':
+            date_query = shortcuts.get_order_subquery(year=year)
+        else:
+            date_query = shortcuts.get_order_subquery(month=month, year=year)
+        orders = Order.select().where(Order.status == Order.FINISHED, *date_query)
         orders_data = [(order.id, order.user.username, order.date_created.strftime('%d/%m/%Y')) for order in orders]
         orders = [(_('Order №{} @{} {}').format(order_id, user_name, order_date), order_id) for order_id, user_name, order_date in orders_data]
         user_data['admin_finished_orders'] = orders
-        bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=_('Select order'),
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=_('Select order'),
                               reply_markup=keyboards.general_select_one_keyboard(_, orders),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
@@ -1584,7 +2291,7 @@ def on_admin_orders_finished_select(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action == 'back':
         state = enums.ADMIN_ORDERS_FINISHED_DATE
-        shortcuts.initialize_calendar(bot, user_data, chat_id, msg_id, state, _, query.id)
+        shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
         return state
     orders = user_data['admin_finished_orders']
     if action == 'page':
