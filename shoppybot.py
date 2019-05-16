@@ -25,47 +25,17 @@ def error_callback(bot, update, error):
 
 
 def main():
-    courier_conversation_handler = ConversationHandler(
-        entry_points=[
-            CallbackQueryHandler(courier_handlers.on_courier_action_to_confirm, pattern='^courier_menu_delivered', pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_courier_ping_choice, pattern='^courier_menu_ping', pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_admin_drop_order, pattern='^courier_menu_dropped_admin', pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^courier_menu_dropped', pass_user_data=True)
-        ],
-        states={
-            # enums.COURIER_STATE_INIT: [
-            #     CallbackQueryHandler(courier_handlers.on_courier_action_to_confirm, pattern='^courier_menu_delivered', pass_user_data=True),
-            #     CallbackQueryHandler(courier_handlers.on_courier_ping_choice, pattern='^courier_menu_ping', pass_user_data=True),
-            #     CallbackQueryHandler(courier_handlers.on_admin_drop_order, pattern='^courier_menu_dropped_admin', pass_user_data=True),
-            #     CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^courier_menu_dropped', pass_user_data=True)
-            # ],
-            # enums.COURIER_STATE_PING: [
-            #     CallbackQueryHandler(courier_handlers.on_courier_ping_client, pass_user_data=True)
-            # ],
-            # enums.COURIER_STATE_PING_SOON: [
-            #     CallbackQueryHandler(courier_handlers.on_courier_ping_client_soon, pass_user_data=True),
-            #     MessageHandler(Filters.text, courier_handlers.on_courier_ping_client_soon, pass_user_data=True)
-            # ],
-            # enums.COURIER_STATE_CONFIRM_ORDER: [
-            #     CallbackQueryHandler(courier_handlers.on_courier_confirm_order, pass_user_data=True)
-            # ],
-            # enums.COURIER_STATE_CONFIRM_REPORT: [
-            #     CallbackQueryHandler(courier_handlers.on_courier_confirm_report, pass_user_data=True)
-            # ],
-            # enums.COURIER_STATE_REPORT_REASON: [
-            #     MessageHandler(Filters.text, courier_handlers.on_courier_enter_reason, pass_user_data=True),
-            #     CallbackQueryHandler(courier_handlers.on_courier_cancel_reason, pattern='^back', pass_user_data=True)
-            # ]
-        },
-        fallbacks=[
-            CommandHandler('start', handlers.on_start, pass_user_data=True)
-        ]
-    )
     user_conversation_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', handlers.on_start, pass_user_data=True),
             CallbackQueryHandler(handlers.on_start, pattern='^start_bot', pass_user_data=True),
             CallbackQueryHandler(handlers.on_menu, pattern='^(menu|product)', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_courier_menu, pattern='^courier_menu', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_courier_chat, pattern='^courier_chat', pass_user_data=True),
+            CallbackQueryHandler(handlers.on_chat_with_courier, pattern='^client_chat', pass_user_data=True),
+            CallbackQueryHandler(handlers.on_open_chat_msg, pattern='^client_read_msg', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_open_chat_msg, pattern='^courier_read_msg', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_client_waiting_keyboard, pattern='^courier_ping', pass_user_data=True)
         ],
         states={
             enums.BOT_INIT: [
@@ -74,14 +44,7 @@ def main():
                                      pass_user_data=True)
             ],
             enums.COURIER_STATE_INIT: [
-                CallbackQueryHandler(courier_handlers.on_courier_action_to_confirm, pattern='^courier_menu_delivered',
-                                     pass_user_data=True),
-                CallbackQueryHandler(courier_handlers.on_courier_ping_choice, pattern='^courier_menu_ping',
-                                     pass_user_data=True),
-                CallbackQueryHandler(courier_handlers.on_admin_drop_order, pattern='^courier_menu_dropped_admin',
-                                     pass_user_data=True),
-                CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^courier_menu_dropped',
-                                     pass_user_data=True)
+                CallbackQueryHandler(courier_handlers.on_courier_menu, pattern='^courier_menu', pass_user_data=True),
             ],
             enums.COURIER_STATE_PING: [
                 CallbackQueryHandler(courier_handlers.on_courier_ping_client, pattern='^(back|now|soon)', pass_user_data=True)
@@ -91,14 +54,24 @@ def main():
                 MessageHandler(Filters.text, courier_handlers.on_courier_ping_client_soon, pass_user_data=True)
             ],
             enums.COURIER_STATE_CONFIRM_ORDER: [
-                CallbackQueryHandler(courier_handlers.on_courier_confirm_order, pattern='^yes|no', pass_user_data=True)
+                CallbackQueryHandler(courier_handlers.on_courier_confirm_order, pattern='^(yes|no)', pass_user_data=True)
             ],
             enums.COURIER_STATE_CONFIRM_REPORT: [
-                CallbackQueryHandler(courier_handlers.on_courier_confirm_report, pattern='^yes|no', pass_user_data=True)
+                CallbackQueryHandler(courier_handlers.on_courier_confirm_report, pattern='^(yes|no)', pass_user_data=True)
+            ],
+            enums.COURIER_STATE_CONFIRM_DROPPED: [
+                CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^(yes|no)', pass_user_data=True)
             ],
             enums.COURIER_STATE_REPORT_REASON: [
                 MessageHandler(Filters.text, courier_handlers.on_courier_enter_reason, pass_user_data=True),
-                CallbackQueryHandler(courier_handlers.on_courier_cancel_reason, pattern='^back', pass_user_data=True)
+                CallbackQueryHandler(courier_handlers.on_courier_enter_reason, pattern='^back', pass_user_data=True)
+            ],
+            enums.COURIER_STATE_CHAT: [
+                CallbackQueryHandler(courier_handlers.on_courier_chat, pattern='^courier_chat', pass_user_data=True)
+            ],
+            enums.COURIER_STATE_CHAT_SEND: [
+                MessageHandler(Filters.text | Filters.photo | Filters.video, courier_handlers.on_courier_chat_send, pass_user_data=True),
+                CallbackQueryHandler(courier_handlers.on_courier_chat_send, pattern='^back', pass_user_data=True)
             ],
             enums.BOT_REGISTRATION: [
                 CallbackQueryHandler(handlers.on_registration, pattern='^(register|cancel)',
@@ -201,6 +174,19 @@ def main():
             ],
             enums.BOT_MY_ORDERS_SELECT:[
                 CallbackQueryHandler(handlers.on_my_order_select, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.BOT_CHAT_ORDERS: [
+                CallbackQueryHandler(handlers.on_bot_chat_orders, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.BOT_CHAT_ORDER_SELECTED: [
+                CallbackQueryHandler(handlers.on_bot_chat_order_selected, pattern='^(start|back)', pass_user_data=True)
+            ],
+            enums.BOT_CHAT_WITH_COURIER: [
+                CallbackQueryHandler(handlers.on_chat_with_courier, pattern='^client_chat', pass_user_data=True)
+            ],
+            enums.BOT_CHAT_SEND: [
+                MessageHandler(Filters.text | Filters.video | Filters.photo, handlers.on_chat_send, pass_user_data=True),
+                CallbackQueryHandler(handlers.on_chat_send, pattern='^back', pass_user_data=True)
             ],
             enums.BOT_PRODUCT_CATEGORIES: [
                 CallbackQueryHandler(handlers.on_product_categories, pattern='^(back|page|select)', pass_user_data=True)
@@ -335,8 +321,11 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_admin_orders_finished_date, pattern='^(back|day|month|year)',
                                      pass_user_data=True)
             ],
+            enums.ADMIN_ORDERS_FINISHED_LIST: [
+                CallbackQueryHandler(admin_handlers.on_admin_orders_finished_list, pattern='^(back|page|select)', pass_user_data=True)
+            ],
             enums.ADMIN_ORDERS_FINISHED_SELECT: [
-                CallbackQueryHandler(admin_handlers.on_admin_orders_finished_select, pattern='^(back|page|select)', pass_user_data=True)
+                CallbackQueryHandler(admin_handlers.on_admin_orders_finished_select, pattern='^(send|back)', pass_user_data=True)
             ],
             enums.ADMIN_PRODUCTS: [
                 CallbackQueryHandler(admin_handlers.on_products, pattern='^bot_products', pass_user_data=True)
@@ -620,18 +609,15 @@ def main():
         fallbacks=[
             CallbackQueryHandler(handlers.on_start, pattern='^start_bot',  pass_user_data=True),
             CommandHandler('start', handlers.on_start, pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_courier_action_to_confirm, pattern='^courier_menu_delivered',
-                                 pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_courier_ping_choice, pattern='^courier_menu_ping',
-                                 pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_admin_drop_order, pattern='^courier_menu_dropped_admin',
-                                 pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^courier_menu_dropped',
-                                 pass_user_data=True)
+            CallbackQueryHandler(courier_handlers.on_courier_menu, pattern='^courier_menu', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_courier_chat, pattern='^courier_chat', pass_user_data=True),
+            CallbackQueryHandler(handlers.on_chat_with_courier, pattern='^client_chat', pass_user_data=True),
+            CallbackQueryHandler(handlers.on_open_chat_msg, pattern='^client_read_msg', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_open_chat_msg, pattern='^courier_read_msg', pass_user_data=True),
+            CallbackQueryHandler(courier_handlers.on_client_waiting_keyboard, pattern='^courier_ping', pass_user_data=True)
         ])
     updater = Updater(config.api_token, user_sig_handler=close_db_on_signal, workers=12)
     updater.dispatcher.add_handler(user_conversation_handler)
-    updater.dispatcher.add_handler(courier_conversation_handler)
     updater.dispatcher.add_handler(
         CallbackQueryHandler(handlers.service_channel_courier_query_handler,
                              pattern='^take_order',
@@ -642,6 +628,9 @@ def main():
                              pass_user_data=True))
     updater.dispatcher.add_handler(
         CallbackQueryHandler(handlers.on_service_order_message, pattern='^order',pass_user_data=True)
+    )
+    updater.dispatcher.add_handler(
+        CallbackQueryHandler(handlers.on_service_order_finished_message, pattern='^finished_order', pass_user_data=True)
     )
     updater.dispatcher.add_handler(CallbackQueryHandler(handlers.cancel_order_confirm, pattern='^cancel_order'))
     updater.dispatcher.add_handler(
@@ -654,20 +643,6 @@ def main():
     updater.dispatcher.add_handler((
         CallbackQueryHandler(admin_handlers.on_start_btc_processing, pattern='btc_processing_start')
     ))
-    # courier_handlers_list = [
-    #     CallbackQueryHandler(courier_handlers.on_courier_action_to_confirm, pattern='^courier_menu_confirm',
-    #                          pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_courier_ping_choice, pattern='^courier_menu_ping', pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_admin_drop_order, pattern='^courier_menu_admin_dropped', pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_drop_order, pattern='^courier_menu_dropped', pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_courier_ping_client, pattern='^courier_menu_ping_menu', pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_courier_ping_client_soon, pattern='^courier_menu_ping_soon', pass_user_data=True),
-    #     MessageHandler(Filters.text, courier_handlers.on_courier_ping_client_soon, pattern='^courier_menu_ping_soon', pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_courier_confirm_order, pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_courier_confirm_report, pass_user_data=True),
-    #     MessageHandler(Filters.text, courier_handlers.on_courier_enter_reason, pass_user_data=True),
-    #     CallbackQueryHandler(courier_handlers.on_courier_cancel_reason, pattern='^back', pass_user_data=True)
-    # ]
     updater.dispatcher.add_error_handler(handlers.on_error)
     start_orders_processing(updater.bot)
     updater.start_polling()

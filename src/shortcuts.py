@@ -1,17 +1,20 @@
 from collections import defaultdict
 import datetime
 import operator
+import time
 
 from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
+from telegram.ext.dispatcher import run_async
 
-from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, get_full_product_info, get_currency_symbol
+from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, get_full_product_info, get_currency_symbol,\
+    get_service_channel
 from .btc_wrapper import CurrencyConverter, wallet_enable_hd
 from .cart_helper import Cart
 
 from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission,\
     UserIdentificationAnswer, Product, ProductCategory, WorkingHours, Currencies, User, CurrencyRates, \
-    BitcoinCredentials, Channel, ChannelPermissions, Location
+    BitcoinCredentials, Channel, ChannelPermissions, Location, CourierChatMessage, CourierChat
 from . import keyboards, messages, states
 
 
@@ -280,44 +283,44 @@ def check_order_products_credits(order, courier=None):
             return not_defined
 
 
-def check_order_products_credits(order, trans, courier=None):
-    msg = ''
-    first_msg = True
-    not_defined = False
-    for order_item in order.order_items:
-        product = order_item.product
-        if courier:
-            try:
-                warehouse = ProductWarehouse.get(product=product, courier=courier)
-                warehouse_count = warehouse.count
-            except ProductWarehouse.DoesNotExist:
-                warehouse = ProductWarehouse(product=product, courier=courier)
-                warehouse.save()
-        else:
-            warehouse_count = product.credits
-        product_warehouse = ProductWarehouse.get(product=product)
-        product_warehouse_count = product_warehouse.count
-        # if product_warehouse_count <= 0:
-        #     not_defined = True
-        #     return not_defined
-        if order_item.count > warehouse_count:
-            _ = trans
-            product_title = escape_markdown(product.title.replace('`', ''))
-            if courier:
-                if first_msg:
-                    msg += _('You don\'t have enough credits to deliver products:\n')
-                    first_msg = False
-                msg += _('Product: `{}`\nCount: {}\nCourier credits: {}\n').format(product_title,
-                                                                                   order_item.count,
-                                                                                   warehouse_count)
-            else:
-                if first_msg:
-                    msg += _('There are not enough credits in warehouse to deliver products:\n')
-                    first_msg = False
-                msg += _('Product: `{}`\nCount: {}\nWarehouse credits: {}\n').format(product_title,
-                                                                                     order_item.count,
-                                                                                     warehouse_count)
-    return msg
+# def check_order_products_credits(order, trans, courier=None):
+#     msg = ''
+#     first_msg = True
+#     not_defined = False
+#     for order_item in order.order_items:
+#         product = order_item.product
+#         if courier:
+#             try:
+#                 warehouse = ProductWarehouse.get(product=product, courier=courier)
+#                 warehouse_count = warehouse.count
+#             except ProductWarehouse.DoesNotExist:
+#                 warehouse = ProductWarehouse(product=product, courier=courier)
+#                 warehouse.save()
+#         else:
+#             warehouse_count = product.credits
+#         product_warehouse = ProductWarehouse.get(product=product)
+#         product_warehouse_count = product_warehouse.count
+#         # if product_warehouse_count <= 0:
+#         #     not_defined = True
+#         #     return not_defined
+#         if order_item.count > warehouse_count:
+#             _ = trans
+#             product_title = escape_markdown(product.title.replace('`', ''))
+#             if courier:
+#                 if first_msg:
+#                     msg += _('You don\'t have enough credits to deliver products:\n')
+#                     first_msg = False
+#                 msg += _('Product: `{}`\nCount: {}\nCourier credits: {}\n').format(product_title,
+#                                                                                    order_item.count,
+#                                                                                    warehouse_count)
+#             else:
+#                 if first_msg:
+#                     msg += _('There are not enough credits in warehouse to deliver products:\n')
+#                     first_msg = False
+#                 msg += _('Product: `{}`\nCount: {}\nWarehouse credits: {}\n').format(product_title,
+#                                                                                      order_item.count,
+#                                                                                      warehouse_count)
+#     return msg
 
 
 def change_order_products_credits(order, add=False, courier=None):
@@ -327,13 +330,51 @@ def change_order_products_credits(order, add=False, courier=None):
         op = operator.sub
     for order_item in order.order_items:
         product = order_item.product
-        if courier:
-            warehouse = ProductWarehouse.get(product=product, courier=courier)
-            warehouse.count = op(warehouse.count, order_item.count)
-            warehouse.save()
-        else:
-            product.credits = op(product.credits, order_item.count)
-            product.save()
+        if product.warehouse_active:
+            if courier:
+                warehouse = ProductWarehouse.get(product=product, courier=courier)
+                warehouse.count = op(warehouse.count, order_item.count)
+                warehouse.save()
+            else:
+                product.credits = op(product.credits, order_item.count)
+                product.save()
+
+
+@run_async
+def check_courier_available(courier_chat_id, bot):
+    wait_period = 30 * 60
+    refresh_delay = 30
+    time_passed = 0
+    chat_id = get_service_channel()
+    chat = CourierChat.get(id=courier_chat_id)
+    order = chat.order
+    courier = chat.courier
+    _ = get_channel_trans()
+    while time_passed != wait_period:
+        chat = CourierChat.get(id=courier_chat_id)
+        if chat.unresponsible_answer == CourierChat.YES:
+            return
+        elif chat.unresponsible_answer == CourierChat.NO:
+            break
+        time.sleep(refresh_delay)
+        time_passed += refresh_delay
+    msg = _('Order №{}:').format(order.id)
+    msg += '\n'
+    if chat.unresponsible_answer is None:
+        msg += _('Courier don\'t respond for notification for 30 minutes.')
+    else:
+        msg += _('Something is wrong with courier.')
+    msg += '\n'
+    msg += _('Courier responsibility dropped.')
+    send_channel_msg(bot, msg, chat_id, order=order, parse_mode=None)
+    change_order_products_credits(order, True, courier)
+    order.courier = None
+    order.status = Order.CONFIRMED
+    order.save()
+    courier_id = courier.telegram_id
+    _ = get_trans(courier_id)
+    msg = _('Your responsibility for Order №{} has been dropped.').format(order.id)
+    bot.send_message(courier_id, msg)
 
 
 def send_product_media(bot, product, chat_id):
@@ -423,6 +464,19 @@ def send_channel_msg(bot, msg, chat_id, keyboard=None, order=None, parse_mode=Pa
     ChannelMessageData.create(channel=str(chat_id), msg_id=sent_msg_id, order=order)
     return sent_msg_id
 
+
+def send_channel_photo(bot, photo, chat_id, caption=None, order=None):
+    sent_msg = bot.send_photo(chat_id, photo, caption)
+    sent_msg_id = str(sent_msg['message_id'])
+    ChannelMessageData.create(channel=str(chat_id), msg_id=sent_msg_id, order=order)
+    return sent_msg_id
+
+
+def send_channel_video(bot, video, chat_id, caption=None, order=None):
+    sent_msg = bot.send_video(chat_id, video, caption)
+    sent_msg_id = str(sent_msg['message_id'])
+    ChannelMessageData.create(channel=str(chat_id), msg_id=sent_msg_id, order=order)
+    return sent_msg_id
 
 def send_channel_location(bot, chat_id, lat, lng, order=None):
     sent_msg = bot.send_location(chat_id, lat, lng)
@@ -565,6 +619,48 @@ def check_btc_status(_, wallet_id, password):
         if success or msg.lower().startswith('current wallet is already an hd wallet'):
             msg = None
     return msg
+
+
+def send_chat_msg(_, bot, db_msg, chat_id, msg_id=None, read=False):
+    msg = db_msg.message
+    msg_type = db_msg.msg_type
+    if msg_type in (CourierChatMessage.VIDEO, CourierChatMessage.PHOTO):
+        if read:
+            caption = '✅'
+            sent_id = bot.edit_message_caption(chat_id, msg_id, caption=caption)
+        else:
+            if msg_type == CourierChatMessage.VIDEO:
+                sent_id = bot.send_video(chat_id, msg)
+            else:
+                sent_id = bot.send_photo(chat_id, msg)
+    else:
+        if read:
+            msg += '\n'
+            msg += '✅'
+        if msg_id:
+            sent_id = bot.edit_message_text(msg, chat_id, msg_id)
+        else:
+            sent_id = bot.send_message(chat_id, msg, msg_id)
+    db_msg.sent_msg_id = sent_id
+    db_msg.read = True
+    db_msg.save()
+
+
+
+# def courier_get_order(_, order_id):
+#     try:
+#         order = Order.get(id=order_id)
+#     except Order.DoesNotExist:
+#         logger.info('Order № {} not found!'.format(order_id))
+#         msg = _('Order #{} does not exist.')
+#         order = None
+#     else:
+#         if order.status == Order.CANCELLED:
+#             msg = _('Order #{} was cancelled.')
+#             order = None
+#         else:
+#             msg = None
+#     return order, msg
 
 
 

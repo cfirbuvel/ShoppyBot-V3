@@ -234,7 +234,7 @@ def enter_courier_warehouse_detail(_, bot, chat_id, warehouse, msg_id=None, quer
     return enums.ADMIN_COURIER_WAREHOUSE_DETAIL
 
 
-def enter_courier_warehouse_products(_, bot, chat_id, msg_id, query_id, page):
+def enter_courier_warehouse_products(_, bot, chat_id, msg_id, query_id, page=1):
     active_products = Product.select(Product.title, Product.id) \
         .where(Product.warehouse_active == True, Product.is_active == True).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, active_products, page_num=page)
@@ -618,3 +618,20 @@ def enter_statistics_user_select(_, bot, chat_id, msg_id, query_id, page=1, msg=
     bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_STATISTICS_USER_SELECT
+
+
+def enter_courier_main_menu(_, bot, chat_id, user, order, msg_id=None, query_id=None, return_state=True):
+    try:
+        btc_data = OrderBtcPayment.get(order=order)
+    except OrderBtcPayment.DoesNotExist:
+        btc_data = None
+    msg = messages.create_service_notice(_, order, btc_data, for_courier=True)
+    reply_markup = keyboards.courier_order_status_keyboard(_, order.id, user)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    if query_id:
+        bot.answer_callback_query(query_id)
+    if return_state:
+        return enums.COURIER_STATE_INIT

@@ -7,7 +7,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 
 from .cart_helper import Cart
 from .helpers import config
-from .models import Currencies, Channel, Location, Order
+from .models import Currencies, Channel, Location, Order, CourierLocation
 
 
 def confirmation_keyboard(_):
@@ -171,6 +171,7 @@ def main_keyboard(_, user):
         buttons.append([InlineKeyboardButton(_('➡️ Registration'), callback_data='menu_register')])
     if user.user_orders:
         buttons.append([InlineKeyboardButton(_('📖 My Orders'), callback_data='menu_my_orders')])
+        buttons.append([InlineKeyboardButton(_('⌨️ Chat with courier'), callback_data='menu_chat')])
     if user.is_admin or user.is_logistic_manager:
         buttons.append([InlineKeyboardButton(_('⚙️ Settings'), callback_data='menu_settings')])
     buttons.insert(0, first_btns)
@@ -390,6 +391,8 @@ def bot_settings_keyboard(_, user):
     ]
     if user.is_admin:
         admin_buttons = [
+            [InlineKeyboardButton(_('🎰 Lottery'),
+                                  callback_data='bot_settings_lottery')],
             [InlineKeyboardButton(_('⭐ Channels'),
                                   callback_data='bot_settings_channels')],
             [InlineKeyboardButton(_('🈚️ Default language'),
@@ -404,6 +407,17 @@ def bot_settings_keyboard(_, user):
         buttons += admin_buttons
 
     return InlineKeyboardMarkup(buttons)
+
+
+def lottery_settings_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('Lottery settings'), callback_data='lottery_settings')],
+        [InlineKeyboardButton(_('Create lottery'), callback_data='lottery_create')],
+        [InlineKeyboardButton(_('Show winners'), callback_data='lottery_winners')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='lottery_back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
 
 
 def edit_messages_keyboard(_):
@@ -775,12 +789,9 @@ def general_select_one_keyboard(_, objects, page_num=1, page_len=10, cancel=Fals
 def couriers_choose_keyboard(trans, couriers, order_id, message_id):
     _ = trans
     couriers_list = []
-    for courier in couriers:
-        if courier.location:
-            courier_str = '@{}, from {}'.format(courier.username, courier.location.title)
-        else:
-            courier_str = '@{}'.format(courier.username)
-        couriers_list.append([InlineKeyboardButton(courier_str, callback_data='sendto|{}|{}|{}'.format(courier.telegram_id,
+    for username, tg_id in couriers:
+        courier_str = '@{}'.format(username)
+        couriers_list.append([InlineKeyboardButton(courier_str, callback_data='sendto|{}|{}|{}'.format(tg_id,
                                                                                               order_id, message_id))])
     couriers_list.append(
         [InlineKeyboardButton(_('❌ Cancel'), callback_data='delete_msg')]
@@ -802,8 +813,8 @@ def service_channel_keyboard(trans, order):
         #                       callback_data='order_add_to_vip|{}'.format(order_id))],
         [InlineKeyboardButton(_('🔥 Add client to ban-list'),
                               callback_data='order_ban_client|{}'.format(order_id))],
-        [InlineKeyboardButton(_('✅ Order Finished'),
-                              callback_data='order_finished|{}'.format(order_id))],
+        # [InlineKeyboardButton(_('✅ Order Finished'),
+        #                       callback_data='order_finished|{}'.format(order_id))],
         [InlineKeyboardButton(_('❌ Cancel order'), callback_data='order_cancel|{}'.format(order_id))],
         [InlineKeyboardButton(_('💳 Hide Order'),
                               callback_data='order_hide|{}'.format(order_id))],
@@ -833,27 +844,94 @@ def show_order_keyboard(_, order_id):
     ]])
 
 
-def courier_order_status_keyboard(trans, order_id):
+def send_to_service_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('📬 Send to service channel'), callback_data='send')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def order_finished_keyboard(_, order_id, show=True):
+    buttons = [
+        [InlineKeyboardButton(_('❌ Delete Order'), callback_data='finished_order_delete|{}'.format(order_id))],
+        [InlineKeyboardButton(_('🎰 Add to lottery'), callback_data='finished_order_lottery|{}'.format(order_id))],
+    ]
+    if show:
+        btn = [InlineKeyboardButton(_('💳 Show Order'), callback_data='finished_order_show|{}'.format(order_id))]
+    else:
+        btn = [InlineKeyboardButton(_('💳 Hide Order'), callback_data='finished_order_hide|{}'.format(order_id))]
+    buttons.insert(0, btn)
+    return InlineKeyboardMarkup(buttons)
+
+
+def courier_order_status_keyboard(trans, order_id, user):
     _ = trans
     buttons = [
         [InlineKeyboardButton(_('✅ Order Done'), callback_data='courier_menu_delivered|{}'.format(order_id))],
-        [InlineKeyboardButton(_('🔥 Report client to admin'),
-                              callback_data='courier_menu_report|{}'.format(order_id))],
-        [InlineKeyboardButton(_('⌨️ Chat with client'), callback_data='courier_menu_chat|{}'.format(order_id))],
         [InlineKeyboardButton(_('📞 Ping Client'), callback_data='courier_menu_ping|{}'.format(order_id))],
         [InlineKeyboardButton(_('❌ Drop responsibility'), callback_data='courier_menu_dropped|{}'.format(order_id))]
     ]
+    if user.is_courier:
+        buttons.insert(1, [InlineKeyboardButton(_('🔥 Report client to admin'), callback_data='courier_menu_report|{}'.format(order_id))])
+        buttons.insert(2, [InlineKeyboardButton(_('⌨️ Chat with client'), callback_data='courier_menu_chat|{}'.format(order_id))])
     return InlineKeyboardMarkup(buttons)
 
 
-def admin_order_status_keyboard(trans, order_id):
-    _ = trans
+def chat_order_selected(_):
     buttons = [
-        [InlineKeyboardButton(_('✅ Order Done'), callback_data='courier_menu_delivered|{}'.format(order_id))],
-        [InlineKeyboardButton(_('📞 Ping Client'), callback_data='courier_menu_ping_admin|{}'.format(order_id))],
-        [InlineKeyboardButton(_('❌ Drop responsibility'), callback_data='courier_menu_dropped_admin|{}'.format(order_id))]
+        [InlineKeyboardButton(_('Start chat'), callback_data='start')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
     ]
     return InlineKeyboardMarkup(buttons)
+
+
+def chat_with_client_keyboard(_, order_id):
+    buttons = [
+        [InlineKeyboardButton(_('📟 Send message'), callback_data='courier_chat_send|{}'.format(order_id))],
+        [InlineKeyboardButton(_('🏁 Finish chat'), callback_data='courier_chat_finish|{}'.format(order_id))]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def chat_with_courier_keyboard(_, order_id, ping=False):
+    buttons = [
+        [InlineKeyboardButton(_('📟 Send message'), callback_data='client_chat_send|{}'.format(order_id))],
+        [InlineKeyboardButton(_('🏁 Finish chat'), callback_data='client_chat_finish|{}'.format(order_id))]
+    ]
+    if ping:
+        buttons.append([InlineKeyboardButton(_('🛎 Ping courier'), callback_data='client_chat_ping|{}'.format(order_id))])
+    return InlineKeyboardMarkup(buttons)
+
+
+def chat_client_msg_keyboard(_, msg_id):
+    buttons = [
+        [InlineKeyboardButton(_('Read message'), callback_data='client_read_msg|{}'.format(msg_id))]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def chat_courier_msg_keyboard(_, msg_id):
+    buttons = [
+        [InlineKeyboardButton(_('Read message'), callback_data='courier_read_msg|{}'.format(msg_id))]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def client_waiting_keyboard(_, chat_id):
+    buttons = [
+        [InlineKeyboardButton(_('Yes'), callback_data='courier_ping_yes|{}'.format(chat_id))],
+        [InlineKeyboardButton(_('No'), callback_data='courier_ping_no|{}'.format(chat_id))]
+    ]
+    return InlineKeyboardMarkup(buttons)
+# def admin_order_status_keyboard(trans, order_id):
+#     _ = trans
+#     buttons = [
+#         [InlineKeyboardButton(_('✅ Order Done'), callback_data='courier_menu_delivered|{}'.format(order_id))],
+#         [InlineKeyboardButton(_('📞 Ping Client'), callback_data='courier_menu_ping_admin|{}'.format(order_id))],
+#         [InlineKeyboardButton(_('❌ Drop responsibility'), callback_data='courier_menu_dropped_admin|{}'.format(order_id))]
+#     ]
+#     return InlineKeyboardMarkup(buttons)
 
 
 def create_ping_client_keyboard(trans):

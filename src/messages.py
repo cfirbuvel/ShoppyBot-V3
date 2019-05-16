@@ -172,7 +172,9 @@ def create_confirmation_text(user_id, order_details, total, products_info, deliv
     #             calculated_fee = CurrencyConverter.convert_currencies(delivery_fee, config.currency, currency)
     #             text += '\n'
     #             text += _('Delivery Fee: {}{}').format(calculated_fee, currency_symbol)
-
+    if delivery_fee:
+        text += '\n'
+        text += _('Delivery Fee: {}{}').format(delivery_fee, currency_symbol)
     discount = config.discount
     discount_min = config.discount_min
     discount_min = CurrencyConverter.convert_currencies(discount_min, config.currency, currency)

@@ -5,6 +5,7 @@ import gettext
 import json
 import logging
 import sys
+import time
 import re
 
 from collections import defaultdict
@@ -16,7 +17,7 @@ from telegram import TelegramError
 
 # from .btc_wrapper import CurrencyConverter
 from .models import ProductCount, Product, User, OrderItem, Currencies, ConfigValue, UserPermission,\
-    BitcoinCredentials, Channel, ChannelPermissions, CurrencyRates, Location, Order
+    BitcoinCredentials, Channel, ChannelPermissions, CurrencyRates, Location, Order, CourierChat
 
 
 class JsonRedis(redis.StrictRedis):

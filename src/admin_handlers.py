@@ -147,7 +147,7 @@ def on_statistics_general(bot, update, user_data):
             date_query = shortcuts.get_order_subquery(month=month, year=year)
             user_data['stats'] = {'month': month, 'year': year}
         print(date_query)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)), *date_query)
+        orders = Order.select().where(Order.status == Order.DELIVERED, *date_query)
         count, price, product_text = shortcuts.get_order_count_and_price(orders)
         orders = Order.select().where(Order.status == Order.CANCELLED, *date_query)
         cancel_count, cancel_price, cancel_product_text = shortcuts.get_order_count_and_price(orders)
@@ -156,12 +156,11 @@ def on_statistics_general(bot, update, user_data):
         msg += '\n\n'
         msg += _('❌ *Total canceled orders*\nCount: {}\n{}\n*Total cost: {}*').format(
             cancel_count, cancel_product_text, cancel_price)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)), *date_query)\
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)), *date_query)\
             .order_by(Order.date_created.desc())
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in orders]
-        page = 1
-        user_data['order_listing_page'] = page
+        user_data['order_listing_page'] = 1
         user_data['stats']['msg'] = msg
         reply_markup = keyboards.general_select_one_keyboard(_, orders)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
@@ -183,7 +182,7 @@ def on_statistics_general_order_select(bot, update, user_data):
         year, month = stats_data.get('year'), stats_data.get('month')
         first_date, second_date = stats_data.get('first_date'), stats_data.get('second_date')
         date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)), *date_query) \
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)), *date_query) \
             .order_by(Order.date_created.desc())
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
@@ -289,7 +288,7 @@ def on_statistics_couriers(bot, update, user_data):
         else:
             date_query = shortcuts.get_order_subquery(month=month, year=year)
             user_data['stats'] = {'month': month, 'year': year}
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)), Order.courier == courier, *date_query)
+        orders = Order.select().where(Order.status == Order.DELIVERED, Order.courier == courier, *date_query)
         count, price, product_text = shortcuts.get_order_count_and_price(orders)
         courier_username = escape_markdown(courier.username)
         msg = _('*✅ Total confirmed orders for Courier* @{}\nCount: {}\n{}\n*Total cost: {}*').format(
@@ -304,15 +303,14 @@ def on_statistics_couriers(bot, update, user_data):
                 count = 0
             msg += '\n'
             msg += '{}: {} credits'.format(product.title, count)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)), Order.courier == courier,
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)), Order.courier == courier,
                                       *date_query).order_by(Order.date_created.desc())
         user_data['stats']['id'] = courier_id
         user_data['stats']['msg'] = msg
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
                   orders]
-        page = 1
-        user_data['order_listing_page'] = page
+        user_data['order_listing_page'] = 1
         user_data['stats']['msg'] = msg
         reply_markup = keyboards.general_select_one_keyboard(_, orders)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
@@ -334,7 +332,7 @@ def on_statistics_courier_order_select(bot, update, user_data):
         date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
         courier_id = user_data['stats']['id']
         courier = User.get(id=courier_id)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)),
                                       Order.courier == courier, *date_query).order_by(Order.date_created.desc())
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
@@ -433,22 +431,21 @@ def on_statistics_locations(bot, update, user_data):
         else:
             date_query = shortcuts.get_order_subquery(month=month, year=year)
             user_data['stats'] = {'month': month, 'year': year}
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)),
+        orders = Order.select().where(Order.status == Order.DELIVERED,
                                       Order.location == location, *date_query)
         count, price, product_text = shortcuts.get_order_count_and_price(orders)
         location_title = escape_markdown(location.title)
         msg = _('✅ *Total confirmed orders for Location* `{}`\nCount: {}\n{}\n*Total cost: {}*').format(
             location_title, count, product_text, price)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)),
                                       Order.location == location, *date_query).order_by(Order.date_created.desc())
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
                   orders]
         user_data['stats']['id'] = location_id
         user_data['stats']['msg'] = msg
-        page = 1
-        user_data['order_listing_page'] = page
-        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        user_data['order_listing_page'] = 1
+        reply_markup = keyboards.general_select_one_keyboard(_, orders)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_STATISTICS_LOCATION_ORDER_SELECT
@@ -470,19 +467,17 @@ def on_statistics_locations_order_select(bot, update, user_data):
     action, val = query.data.split('|')
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action in ('select', 'page'):
-        print('1')
         stats_data = user_data['stats']
         year, month = stats_data.get('year'), stats_data.get('month')
         first_date, second_date = stats_data.get('first_date'), stats_data.get('second_date')
         date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
         loc_id = stats_data['id']
         location = Location.get(id=loc_id)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)),
                                       Order.location == location, *date_query).order_by(Order.date_created.desc())
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
                   orders]
-        print('2')
         if action == 'page':
             page = int(val)
             user_data['order_listing_page'] = page
@@ -496,7 +491,6 @@ def on_statistics_locations_order_select(bot, update, user_data):
                 btc_data = None
             msg = messages.create_service_notice(_, order, btc_data)
             user_data['stats']['msg'] = msg
-        print('3')
         reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
@@ -528,8 +522,7 @@ def on_statistics_users(bot, update, user_data):
         query.answer()
         return enums.ADMIN_STATISTICS_TOP_CLIENTS
     elif action == 'clients_all':
-        page = 1
-        user_data['listing_page'] = page
+        user_data['listing_page'] = 1
         return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id)
 
 
@@ -589,7 +582,7 @@ def on_statistics_user_select_date(bot, update, user_data):
         else:
             date_query = shortcuts.get_order_subquery(month=month, year=year)
             user_data['stats'] = {'month': month, 'year': year}
-        confirmed_orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED)),
+        confirmed_orders = Order.select().where(Order.status == Order.DELIVERED,
                                       Order.user == user, *date_query)
         count, price, product_text = shortcuts.get_order_count_and_price(confirmed_orders)
         cancelled_orders = Order.select().where(Order.status == Order.CANCELLED,Order.user == user, *date_query)
@@ -604,15 +597,14 @@ def on_statistics_user_select_date(bot, update, user_data):
                                                                                                      cancel_product_text,
                                                                                                      cancel_price)
         date_format = '%d-%m-%Y'
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)),
                                       Order.user == user, *date_query)
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
                   orders]
         user_data['stats']['id'] = user_id
         user_data['stats']['msg'] = msg
-        page = 1
-        user_data['order_listing_page'] = page
-        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        user_data['order_listing_page'] = 1
+        reply_markup = keyboards.general_select_one_keyboard(_, orders)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_STATISTICS_USER_ORDER_SELECT
@@ -635,7 +627,7 @@ def on_statistics_user_order_select(bot, update, user_data):
         date_query = shortcuts.get_order_subquery(first_date, second_date, year, month)
         user_id = stats_data['id']
         user = User.get(id=user_id)
-        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.FINISHED, Order.CANCELLED)),
+        orders = Order.select().where(Order.status.in_((Order.DELIVERED, Order.CANCELLED)),
                                       Order.user == user, *date_query).order_by(Order.date_created.desc())
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
@@ -677,13 +669,12 @@ def on_statistics_top_clients(bot, update, user_data):
         reply_markup = keyboards.statistics_users(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         return enums.ADMIN_STATISTICS_USERS
-    page = 1
-    user_data['listing_page'] = page
+    user_data['listing_page'] = 1
     user_data['top_clients'] = {}
     if action == 'top_by_product':
         products = Product.select(Product.title, Product.id).tuples()
         msg = _('Select a product')
-        reply_markup = keyboards.general_select_one_keyboard(_, products, page)
+        reply_markup = keyboards.general_select_one_keyboard(_, products)
         state = enums.ADMIN_STATISTICS_TOP_CLIENTS_PRODUCT
     elif action == 'top_by_date':
         state = enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE
@@ -691,11 +682,11 @@ def on_statistics_top_clients(bot, update, user_data):
     elif action == 'top_by_location':
         locations = Location.select(Location.title, Location.id).tuples()
         msg = _('Select location')
-        reply_markup = keyboards.general_select_one_keyboard(_, locations, page)
+        reply_markup = keyboards.general_select_one_keyboard(_, locations)
         state = enums.ADMIN_STATISTICS_TOP_CLIENTS_LOCATION
     else:
         top_users = User.select(User.username, User.id, fn.COUNT(Order.id)).join(Order, on=Order.user)\
-            .where(Order.status.in_((Order.DELIVERED, Order.FINISHED)))\
+            .where(Order.status == Order.DELIVERED)\
                    .group_by(User).order_by(fn.COUNT(Order.id).desc()).tuples()
         rank = 1
         users = []
@@ -736,10 +727,9 @@ def on_top_users_by_product(bot, update, user_data):
         product = Product.get(id=product_id)
         currency = get_currency_symbol()
         top_users = User.select(User.username, User.id, fn.SUM(OrderItem.total_price)).join(Order, on=Order.user)\
-            .join(OrderItem).where(OrderItem.product == product, Order.status.in_((Order.FINISHED, Order.DELIVERED)))\
+            .join(OrderItem).where(OrderItem.product == product, Order.status == Order.DELIVERED)\
             .group_by(User).order_by(fn.SUM(OrderItem.total_price).desc()).tuples()
         rank = 1
-        print(list(top_users))
         users = []
         for username, id, total in top_users:
             title = '{}. {} - {}{}'.format(rank, username, total, currency)
@@ -784,7 +774,7 @@ def on_top_users_by_location(bot, update, user_data):
         user_data['top_clients']['id'] = loc_id
         location = Location.get(id=loc_id)
         top_users = User.select(User.username, User.id, fn.SUM(Order.total_cost)).join(Order, on=Order.user)\
-            .where(Order.location == location, Order.status.in_((Order.DELIVERED, Order.FINISHED))).group_by(User)\
+            .where(Order.location == location, Order.status == Order.DELIVERED, Order.FINISHED).group_by(User)\
             .order_by(fn.SUM(Order.total_cost).desc()).tuples()
         rank = 1
         print(list(top_users))
@@ -848,7 +838,7 @@ def on_top_by_date(bot, update, user_data):
             user_data['top_clients']['year'] = year
             user_data['top_clients']['month'] = month
         top_users = User.select(User.username, User.id, fn.SUM(Order.total_cost)).join(Order, on=Order.user)\
-            .where(Order.status.in_((Order.DELIVERED, Order.FINISHED)), *date_query).group_by(User).order_by(fn.SUM(Order.total_cost).desc()).tuples()
+            .where(Order.status == Order.DELIVERED, *date_query).group_by(User).order_by(fn.SUM(Order.total_cost).desc()).tuples()
         currency = get_currency_symbol()
         rank = 1
         users = []
@@ -877,7 +867,7 @@ def on_top_users_select(bot, update, user_data):
     top_category = top_data['type']
     if action == 'select':
         user = User.get(id=val)
-        db_query = [Order.user == user, Order.status.in_((Order.FINISHED, Order.DELIVERED))]
+        db_query = [Order.user == user, Order.status == Order.FINISHED]
         if top_category == 'product':
             product = Product.get(id=top_data['id'])
             orders = Order.select().join(OrderItem).where(OrderItem.product == product, *db_query)
@@ -900,11 +890,10 @@ def on_top_users_select(bot, update, user_data):
         date_format = '%d-%m-%Y'
         orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_format)), order.id) for order in
                   orders]
-        page = 1
-        user_data['order_listing_page'] = page
+        user_data['order_listing_page'] = 1
         user_data['top_clients']['msg'] = msg
         user_data['top_clients']['user_id'] = val
-        reply_markup = keyboards.general_select_one_keyboard(_, orders, page)
+        reply_markup = keyboards.general_select_one_keyboard(_, orders)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_STATISTICS_TOP_CLIENTS_ORDER_SELECT
@@ -945,7 +934,7 @@ def on_statistics_top_clients_order_select(bot, update, user_data):
     top_category = top_data['type']
     if action in ('page', 'select'):
         user = User.get(id=top_data['user_id'])
-        db_query = [Order.user == user, Order.status.in_((Order.FINISHED, Order.DELIVERED))]
+        db_query = [Order.user == user, Order.status == Order.DELIVERED]
         if top_category == 'product':
             product = Product.get(id=top_data['id'])
             orders = Order.select().join(OrderItem).where(OrderItem.product == product, *db_query)
@@ -986,8 +975,7 @@ def on_statistics_top_clients_order_select(bot, update, user_data):
             product_id = top_data['id']
             product = Product.get(id=product_id)
             top_users = User.select(User.username, User.id, fn.SUM(OrderItem.total_price)).join(Order, on=Order.user) \
-                .join(OrderItem).where(OrderItem.product == product,
-                                       Order.status.in_((Order.FINISHED, Order.DELIVERED))) \
+                .join(OrderItem).where(OrderItem.product == product, Order.status ==  Order.DELIVERED) \
                 .group_by(User).order_by(fn.SUM(OrderItem.total_price).desc()).tuples()
             rank = 1
             users = []
@@ -1006,7 +994,7 @@ def on_statistics_top_clients_order_select(bot, update, user_data):
             loc_id = top_data['id']
             location = Location.get(id=loc_id)
             top_users = User.select(User.username, User.id, fn.SUM(Order.total_cost)).join(Order, on=Order.user) \
-                .where(Order.location == location, Order.status.in_((Order.DELIVERED, Order.FINISHED))).group_by(User) \
+                .where(Order.location == location, Order.status == Order.DELIVERED).group_by(User) \
                 .order_by(fn.SUM(Order.total_cost).desc()).tuples()
             rank = 1
             users = []
@@ -1019,7 +1007,7 @@ def on_statistics_top_clients_order_select(bot, update, user_data):
             msg = _('🎯 By location')
         else:
             top_users = User.select(User.username, User.id, fn.COUNT(Order.id)).join(Order, on=Order.user) \
-                .where(Order.status.in_((Order.DELIVERED, Order.FINISHED))) \
+                .where(Order.status == Order.DELIVERED) \
                 .group_by(User).order_by(fn.COUNT(Order.id).desc()).tuples()
             rank = 1
             users = []
@@ -1131,8 +1119,7 @@ def on_couriers(bot, update, user_data):
         msg = _('🛵 Couriers')
         couriers = User.select(User.username, User.id).join(UserPermission) \
             .where(UserPermission.permission == UserPermission.COURIER, User.banned == False).tuples()
-        page = user_data['listing_page']
-        page = int(page)
+        page = int(val)
         user_data['listing_page'] = page
         reply_markup = keyboards.general_select_one_keyboard(_, couriers, page_num=page)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
@@ -1171,9 +1158,8 @@ def on_courier_detail(bot, update, user_data):
         query.answer()
         return enums.ADMIN_COURIER_LOCATIONS
     elif action == 'edit_warehouse':
-        page = 1
-        user_data['products_listing_page'] = page
-        return states.enter_courier_warehouse_products(_, bot, chat_id, msg_id, query.id, page)
+        user_data['products_listing_page'] = 1
+        return states.enter_courier_warehouse_products(_, bot, chat_id, msg_id, query.id)
     elif action == 'back':
         del user_data['courier_select']
         msg = _('🛵 Couriers')
@@ -2270,34 +2256,41 @@ def on_admin_orders_finished_date(bot, update, user_data):
             date_query = shortcuts.get_order_subquery(year=year)
         else:
             date_query = shortcuts.get_order_subquery(month=month, year=year)
-        orders = Order.select().where(Order.status == Order.FINISHED, *date_query)
+        orders = Order.select().where(Order.status == Order.DELIVERED, *date_query)
         orders_data = [(order.id, order.user.username, order.date_created.strftime('%d/%m/%Y')) for order in orders]
         orders = [(_('Order №{} @{} {}').format(order_id, user_name, order_date), order_id) for order_id, user_name, order_date in orders_data]
         user_data['admin_finished_orders'] = orders
+        user_data['listing_page'] = 1
         bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=_('Select order'),
                               reply_markup=keyboards.general_select_one_keyboard(_, orders),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
-        return enums.ADMIN_ORDERS_FINISHED_SELECT
+        return enums.ADMIN_ORDERS_FINISHED_LIST
     return states.enter_unknown_command(_, bot, query)
 
 
 @user_passes
-def on_admin_orders_finished_select(bot, update, user_data):
+def on_admin_orders_finished_list(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     action, val = query.data.split('|')
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action == 'back':
+        del user_data['listing_page']
         state = enums.ADMIN_ORDERS_FINISHED_DATE
         shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
         return state
     orders = user_data['admin_finished_orders']
     if action == 'page':
-        page_num = int(val)
-        keyboard = keyboards.general_select_one_keyboard(_, orders, page_num)
+        page = int(val)
+        user_data['listing_page'] = page
         msg = _('Select order')
+        keyboard = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id,
+                              reply_markup=keyboard)
+        query.answer()
+        return enums.ADMIN_ORDERS_FINISHED_LIST
     elif action == 'select':
         order = Order.get(id=val)
         try:
@@ -2308,11 +2301,43 @@ def on_admin_orders_finished_select(bot, update, user_data):
         courier_username = escape_markdown(order.courier.username)
         courier_delivered = _('Courier: {}').format(courier_username)
         msg += '\n\n' + courier_delivered
-        keyboard = keyboards.general_select_one_keyboard(_, orders)
-    bot.edit_message_text(msg, chat_id, msg_id,
-                          reply_markup=keyboard)
-    query.answer()
-    return enums.ADMIN_ORDERS_FINISHED_SELECT
+        user_data['admin_finished_id'] = val
+        reply_markup = keyboards.send_to_service_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_ORDERS_FINISHED_SELECT
+
+
+@user_passes
+def on_admin_orders_finished_select(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    action = query.data
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    if action == 'back':
+        page = user_data['listing_page']
+        msg = _('Select order')
+        orders = user_data['admin_finished_orders']
+        keyboard = keyboards.general_select_one_keyboard(_, orders, page)
+        bot.edit_message_text(msg, chat_id, msg_id,
+                              reply_markup=keyboard)
+        query.answer()
+        return enums.ADMIN_ORDERS_FINISHED_LIST
+    elif action == 'send':
+        order_id = user_data['admin_finished_id']
+        order = Order.get(id=order_id)
+        courier = order.courier
+        status = courier.permission.get_permission_display()
+        service_trans = get_channel_trans()
+        msg = service_trans('Order №{} was delivered by {} @{}\n').format(order.id, status, courier.username)
+        msg += service_trans('Client: @{}').format(order.user.username)
+        keyboard = keyboards.order_finished_keyboard(_, order_id)
+        msg_id = shortcuts.send_channel_msg(bot, msg, get_service_channel(), keyboard, order, parse_mode=None)
+        order.order_text_msg_id = msg_id
+        order.save()
+        query.answer(_('Order was sent to service channel.'))
+        return enums.ADMIN_ORDERS_FINISHED_SELECT
 
 
 @user_passes
@@ -3807,18 +3832,17 @@ def on_admin_bot_status(bot, update, user_data):
             value = not config.bot_on_off
             config.set_value(action, value)
         else:
-            old_value = getattr(config, action)
-            if old_value:
-                query.answer()
-                return enums.ADMIN_BOT_STATUS
             actions_map = {
                 'bot_status_only_reg': 'only_for_registered', 'bot_status_watch': 'watch_non_registered',
                 'bot_status_order': 'order_non_registered'
             }
-
+            conf_name = actions_map[action]
+            old_value = getattr(config, conf_name)
+            if old_value:
+                query.answer()
+                return enums.ADMIN_BOT_STATUS
             for v in actions_map.values():
                 config.set_value(v, False)
-            conf_name = actions_map[action]
             config.set_value(conf_name, True)
         msg = _('⚡️ Bot Status')
         reply_markup = keyboards.create_bot_status_keyboard(_)

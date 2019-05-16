@@ -203,7 +203,7 @@ class Order(BaseModel):
     PROCESSING = 2
     DELIVERED = 3
     CANCELLED = 4
-    FINISHED = 5
+    # FINISHED = 5
     STATUSES = (
         (CONFIRMED, _('Confirmed')), (PROCESSING, _('Processing')), (DELIVERED, _('Delivered')), (CANCELLED, _('Cancelled'))
     )
@@ -320,6 +320,31 @@ class BitcoinCredentials(BaseModel):
     enabled = BooleanField(default=False)
 
 
+class CourierChat(BaseModel):
+    YES = 1
+    NO = 2
+    ANSWER_CHOICES = (YES, 'yes'), (NO, 'no')
+    active = BooleanField(default=False)
+    order = ForeignKeyField(Order, related_name='chats')
+    user = ForeignKeyField(User, related_name='chats')
+    courier = ForeignKeyField(User, related_name='chats')
+    unresponsible_answer = IntegerField(choices=ANSWER_CHOICES, null=True)
+    ping_sent = BooleanField(default=False)
+    user_menu_id = CharField(null=True)
+    courier_menu_id = CharField(null=True)
+
+
+class CourierChatMessage(BaseModel):
+    chat = ForeignKeyField(CourierChat, related_name='messages')
+    msg_type = CharField()
+    message = CharField()
+    author = ForeignKeyField(User, related_name='read_messages')
+    replied = BooleanField(default=False)
+    read = BooleanField(default=False)
+    sent_msg_id = CharField(null=True)
+    date_created = DateTimeField(default=datetime.datetime.now)
+
+
 def create_tables():
     try:
         db.connect()
@@ -333,7 +358,7 @@ def create_tables():
             Order, OrderItem, ProductWarehouse, ProductMedia, IdentificationStage,
             OrderIdentificationAnswer, IdentificationQuestion, ChannelMessageData, GroupProductCount,
             CurrencyRates, BitcoinCredentials, OrderBtcPayment, BtcProc, ConfigValue, UserIdentificationAnswer, CourierLocation,
-            WorkingHours, GroupProductCountPermission
+            WorkingHours, GroupProductCountPermission, CourierChat, CourierChatMessage
         ], safe=True
     )
 
