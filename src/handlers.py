@@ -6,7 +6,7 @@ import re
 from telegram import ParseMode, ReplyKeyboardRemove
 from telegram.ext import ConversationHandler
 from telegram.utils.helpers import escape_markdown
-from peewee import fn
+from peewee import fn, JOIN
 
 from . import keyboards, enums, shortcuts, messages, states
 from .cart_helper import Cart
@@ -18,7 +18,7 @@ from .helpers import get_user_id, get_username, get_locale, get_trans, config, l
 from .models import User, Product, ProductCategory, Order, Location, OrderBtcPayment, BitcoinCredentials, \
     Channel, UserPermission, IdentificationStage, IdentificationQuestion, UserIdentificationAnswer,\
     ChannelPermissions, WorkingHours, OrderIdentificationAnswer, BtcStage, ProductWarehouse, OrderItem,\
-    CourierLocation, Currencies, CourierChat, CourierChatMessage
+    CourierLocation, Currencies, CourierChat, CourierChatMessage, GroupProductCount, GroupProductCountPermission
 
 
 @user_passes
@@ -71,17 +71,16 @@ def on_menu(bot, update, user_data):
                 query.answer()
                 return enums.BOT_PRODUCT_CATEGORIES
             else:
-                products = Product.select().where(Product.is_active == True)
+                products = shortcuts.get_users_products(user)
                 if products.exists():
                     bot.delete_message(chat_id, msg_id)
                     products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                     user_data['products_msgs'] = products_msgs
-                    return states.enter_menu(bot, update, user_data, query.id)
+                    return states.enter_menu(bot, update, user_data, query_id=query.id)
                 else:
                     query.answer()
                     return enums.BOT_INIT
         elif data == 'menu_order':
-            print('order')
             delivery_method = config.delivery_method
             if not delivery_method:
                 msg = _('Sorry, we have technical issues. Cannot make order now.')
@@ -114,13 +113,13 @@ def on_menu(bot, update, user_data):
                         msg = _('Category `{}` products:').format(cat_title)
                         cat_msg = bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
                         products_msgs = [cat_msg['message_id']]
-                        products = Product.select().where(Product.is_active == True, Product.category == cat)
+                        products = shortcuts.get_users_products(user, cat)
                         if products.exists():
                             products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                             user_data['products_msgs'] = products_msgs
                         return states.enter_menu(bot, update, user_data, query.id)
                     else:
-                        products = Product.select().where(Product.is_active == True)
+                        products = shortcuts.get_users_products(user)
                         if products.exists():
                             products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                             user_data['products_msgs'] = products_msgs
@@ -201,13 +200,13 @@ def on_menu(bot, update, user_data):
                     msg = _('Category `{}` products:').format(cat_title)
                     cat_msg = bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
                     products_msgs = [cat_msg['message_id']]
-                    products = Product.select().where(Product.is_active == True, Product.category == cat)
+                    products = shortcuts.get_users_products(user, cat)
                     if products.exists():
                         products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                         user_data['products_msgs'] = products_msgs
                     return states.enter_menu(bot, update, user_data, menu_msg_id, query.id)
                 else:
-                    products = Product.select().where(Product.is_active == True)
+                    products = shortcuts.get_users_products(user)
                     if products.exists():
                         products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
                         user_data['products_msgs'] = products_msgs
@@ -2103,7 +2102,7 @@ def on_product_categories(bot, update, user_data):
         cat_msg = bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN)
         products_msgs = [cat_msg['message_id']]
         # send_products to current chat
-        products = Product.select().where(Product.category == cat, Product.is_active == True)
+        products = shortcuts.get_users_products(user, cat)
         if products.exists():
             user = User.get(telegram_id=user_id)
             msgs_ids = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)

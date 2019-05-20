@@ -2,6 +2,7 @@ from collections import defaultdict
 import datetime
 import operator
 import time
+from peewee import JOIN
 
 from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
@@ -14,7 +15,8 @@ from .cart_helper import Cart
 
 from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission,\
     UserIdentificationAnswer, Product, ProductCategory, WorkingHours, Currencies, User, CurrencyRates, \
-    BitcoinCredentials, Channel, ChannelPermissions, Location, CourierChatMessage, CourierChat
+    BitcoinCredentials, Channel, ChannelPermissions, Location, CourierChatMessage, CourierChat, \
+    GroupProductCount, GroupProductCountPermission
 from . import keyboards, messages, states
 
 
@@ -403,6 +405,26 @@ def send_products(_, bot, user_data, chat_id, products, currency):
         msg = bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, timeout=20)
         msgs_ids.append(msg['message_id'])
     return msgs_ids
+
+
+def get_users_products(user, category=None):
+    db_query = (
+        (GroupProductCountPermission.permission == user.permission)
+        | (GroupProductCountPermission.price_group.is_null(True))
+        | (User.group_price.is_null(False))
+    )
+    user_group_prices = GroupProductCount.select().join(GroupProductCountPermission, JOIN.LEFT_OUTER) \
+        .switch(GroupProductCount).join(User, JOIN.LEFT_OUTER).where(db_query).group_by(GroupProductCount.id)
+    user_group_prices = list(user_group_prices)
+    print(user_group_prices)
+    db_query = (
+        (Product.group_price.in_(user_group_prices)) | (Product.group_price.is_null(True))
+    )
+    db_query = [Product.is_active == True, db_query]
+    if category:
+        db_query.append(Product.category == category)
+    products = Product.select().where(*db_query).group_by(Product.id)
+    return products
 
 
 def send_menu_msg(_, bot, user, products_info, chat_id, msg_id=None, query_id=None):

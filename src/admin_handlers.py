@@ -1142,7 +1142,7 @@ def on_courier_detail(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action = query.data
     courier_id = user_data['courier_select']
-    if action == 'change_locations':
+    if action == 'courier_details_locations':
         courier = User.get(id=courier_id)
         courier_locs = Location.select().join(CourierLocation)\
             .where(CourierLocation.user == courier)
@@ -1157,10 +1157,10 @@ def on_courier_detail(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_COURIER_LOCATIONS
-    elif action == 'edit_warehouse':
+    elif action == 'courier_details_warehouse':
         user_data['products_listing_page'] = 1
         return states.enter_courier_warehouse_products(_, bot, chat_id, msg_id, query.id)
-    elif action == 'back':
+    elif action == 'courier_details_back':
         del user_data['courier_select']
         msg = _('🛵 Couriers')
         couriers = User.select(User.username, User.id).join(UserPermission) \
@@ -1375,18 +1375,36 @@ def on_users(bot, update, user_data):
     _ = get_trans(user_id)
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action in ('users_registered', 'users_pending', 'users_black_list'):
-        user_data['listing_page'] = 1
         if action == 'users_registered':
-            return states.enter_settings_registered_users(_, bot, chat_id, msg_id, query.id)
+            return states.enter_settings_registered_users_perms(_, bot, chat_id, msg_id, query.id)
         elif action == 'users_pending':
+            user_data['listing_page'] = 1
             return states.enter_pending_registrations(_, bot, chat_id, msg_id, query.id)
         else:
+            user_data['listing_page'] = 1
             return states.enter_black_list(_, bot, chat_id, msg_id, query.id)
     if action == 'users_back':
         msg = _('⚙️ Settings')
         reply_markup = keyboards.admin_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         return enums.ADMIN_MENU
+    return states.enter_unknown_command(_, bot, query)
+
+
+@user_passes
+def on_registered_users_perms(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'select':
+        perm = UserPermission.get(id=val)
+        user_data['registered_users'] = {'perm_id': val}
+        user_data['listing_page'] = 1
+        return states.enter_settings_registered_users(_, bot, chat_id, perm, msg_id, query.id)
+    elif action == 'back':
+        return states.enter_settings_users(_, bot, chat_id, msg_id, query.id)
     return states.enter_unknown_command(_, bot, query)
 
 
@@ -1400,7 +1418,9 @@ def on_registered_users(bot, update, user_data):
     if action == 'page':
         page = int(val)
         user_data['listing_page'] = page
-        return states.enter_settings_registered_users(_, bot, chat_id, msg_id, query.id, page=page)
+        perm_id = user_data['registered_users']['perm_id']
+        perm = UserPermission.get(id=perm_id)
+        return states.enter_settings_registered_users(_, bot, chat_id, perm, msg_id, query.id, page=page)
     elif action == 'select':
         user = User.get(id=val)
         username = escape_markdown(user.username)
@@ -1411,7 +1431,7 @@ def on_registered_users(bot, update, user_data):
         return states.enter_registered_users_select(_, bot, chat_id, msg, query.id, msg_id)
     elif action == 'back':
         del user_data['listing_page']
-        return states.enter_settings_users(_, bot, chat_id, msg_id, query.id)
+        return states.enter_settings_registered_users_perms(_, bot, chat_id, msg_id, query.id)
     return states.enter_unknown_command(_, bot, query)
 
 
@@ -1588,21 +1608,21 @@ def on_pending_registrations_user(bot, update, user_data):
     if action in ('approve_user', 'black_list', 'back'):
         user_id = user_data['user_select']
         user = User.get(id=user_id)
-        username = escape_markdown(user.username)
+        username = user.username
         if action == 'approve_user':
-            msg = _('Select new status for user *{}*').format(username)
+            msg = _('Select new status for user @{}').format(username)
             registered_perms = (UserPermission.OWNER, UserPermission.NOT_REGISTERED, UserPermission.PENDING_REGISTRATION)
             perms = UserPermission.select().where(UserPermission.permission.not_in(registered_perms)) \
                 .order_by(UserPermission.permission.desc())
             perms = [(perm.get_permission_display(), perm.id) for perm in perms]
             reply_markup = keyboards.general_select_one_keyboard(_, perms, page_len=len(perms))
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
             query.answer()
             return enums.ADMIN_PENDING_REGISTRATIONS_APPROVE
         elif action == 'black_list':
-            msg = _('Black-list user *{}*?').format(username)
+            msg = _('Black-list user @{}?').format(username)
             reply_markup = keyboards.are_you_sure_keyboard(_)
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
             query.answer()
             return enums.ADMIN_PENDING_REGISTRATIONS_BLACK_LIST
         else:
@@ -4103,6 +4123,12 @@ def on_admin_product_price_group_selected(bot, update, user_data):
         query.answer()
         return enums.ADMIN_PRODUCT_PRICE_GROUP_CHANGE
     elif action == 'special_clients':
+        # msg = _('👫 Special clients')
+        # reply_markup = keyboards.price_group_clients_keyboard(_)
+        # user_data['admin_special_clients'] = {'group_id': val}
+        # bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        # query.answer()
+        # return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS
         group = GroupProductCount.get(id=val)
         msg = _('Please select special clients for group {}').format(group.name)
         permissions = [
@@ -4119,7 +4145,7 @@ def on_admin_product_price_group_selected(bot, update, user_data):
             special_clients.append((perm.get_permission_display(), perm.id, is_picked))
             if is_picked:
                 selected_ids.append(perm.id)
-        user_data['admin_special_clients'] = {'selected_ids': selected_ids, 'group_id': group.id}
+        user_data['admin_special_clients'] = {'group_id': val, 'selected_ids': selected_ids}
         reply_markup = keyboards.general_select_keyboard(_, special_clients)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
@@ -4143,6 +4169,52 @@ def on_admin_product_price_group_selected(bot, update, user_data):
         return states.enter_price_groups_list(_, bot, chat_id, msg_id, query.id, msg, page)
     else:
         return states.enter_unknown_command(_, bot, query)
+
+
+# @user_passes
+# def on_admin_product_price_group_clients(bot, update, user_data):
+#     user_id = get_user_id(update)
+#     _ = get_trans(user_id)
+#     query = update.callback_query
+#     chat_id, msg_id = query.message.chat_id, query.message.message_id
+#     action = query.data
+#     group_id = user_data['admin_special_clients']['group_id']
+#     if action == 'back':
+#         return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
+#     elif action == 'perms':
+#         group = GroupProductCount.get(id=group_id)
+#         msg = _('Please select special clients for group {}').format(group.name)
+#         permissions = [
+#             UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
+#             UserPermission.VIP_CLIENT
+#         ]
+#         permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+#         group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
+#         group_perms = [group_perm.permission for group_perm in group_perms]
+#         special_clients = []
+#         selected_ids = []
+#         for perm in permissions:
+#             is_picked = perm in group_perms
+#             special_clients.append((perm.get_permission_display(), perm.id, is_picked))
+#             if is_picked:
+#                 selected_ids.append(perm.id)
+#         user_data['admin_special_clients']['selected_ids'] = selected_ids
+#         reply_markup = keyboards.general_select_keyboard(_, special_clients)
+#         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+#         query.answer()
+#         return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS
+    # else:
+    #     group = GroupProductCount.get(id=group_id)
+    #     group_perms = UserPermission.select().join(GroupProductCountPermission)\
+    #         .where(GroupProductCountPermission.price_group == group).group_by(UserPermission.id)
+    #     msg = _('Please select clients for group {}').format(group.name)
+    #     if group_perms.exists():
+    #         perms_query = User.permission.in_(list(group_perms))
+    #     else:
+    #         perms_query = User.permission.not_in([UserPermission.OWNER, UserPermission.PENDING_REGISTRATION, UserPermission.NOT_REGISTERED])
+    #     clients = User.select(User.username, User.id, User.permission).where(perms_query).order_by(User.permission).tuples()
+    #     clients = [('{} - {}'.format(user.username, user.perm.get_permission_display()), user.id) for user in clients]
+    #     reply_markup = keyboards.general_select_one_keyboard(_, clients)
 
 
 @user_passes

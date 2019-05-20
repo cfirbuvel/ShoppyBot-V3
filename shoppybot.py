@@ -413,7 +413,7 @@ def main():
                 MessageHandler(Filters.text, admin_handlers.on_warehouse_courier_edit, pass_user_data=True)
             ],
             enums.ADMIN_CATEGORIES: [
-                CallbackQueryHandler(admin_handlers.on_admin_categories, pattern='^(back|add)', pass_user_data=True),
+                CallbackQueryHandler(admin_handlers.on_admin_categories, pattern='^(back|add|products|remove)', pass_user_data=True),
             ],
             enums.ADMIN_CATEGORY_ADD: [
                 CallbackQueryHandler(admin_handlers.on_admin_category_add, pattern='^back', pass_user_data=True),
@@ -462,6 +462,9 @@ def main():
             enums.ADMIN_USERS: [
                 CallbackQueryHandler(admin_handlers.on_users, pattern='^users', pass_user_data=True),
                 CommandHandler('cancel', admin_handlers.on_cancel)
+            ],
+            enums.ADMIN_REGISTERED_USERS_PERMS: [
+                CallbackQueryHandler(admin_handlers.on_registered_users_perms, pattern='^(back|select)', pass_user_data=True)
             ],
             enums.ADMIN_REGISTERED_USERS: [
                 CallbackQueryHandler(admin_handlers.on_registered_users, pattern='^(back|page|select)', pass_user_data=True),

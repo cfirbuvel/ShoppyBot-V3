@@ -4,6 +4,7 @@ from decimal import Decimal
 from telegram import ParseMode, ReplyKeyboardRemove
 from telegram.ext import ConversationHandler
 from telegram.utils.helpers import escape_markdown, escape
+from peewee import JOIN
 
 
 from . import keyboards, messages, enums, shortcuts
@@ -127,12 +128,29 @@ def enter_settings_users(_, bot, chat_id, msg_id, query_id):
     return enums.ADMIN_USERS
 
 
-def enter_settings_registered_users(_, bot, chat_id, msg_id, query_id, page=1, msg=None):
+def enter_settings_registered_users_perms(_, bot, chat_id, msg_id, query_id, msg=None):
+    if not msg:
+        msg = _('👩 Select permission')
+        # msg = _('👩 Registered users')
+    registered_perms = (UserPermission.OWNER, UserPermission.NOT_REGISTERED, UserPermission.PENDING_REGISTRATION)
+    statuses = UserPermission.select().join(User)\
+        .where(User.id != None, UserPermission.permission.not_in(registered_perms)).group_by(UserPermission.permission)
+    statuses = [(status.get_permission_display(), status.id) for status in statuses]
+
+    # users = User.select(User.username, User.id).join(UserPermission) \
+    #     .where(UserPermission.permission.not_in(registered_perms), User.banned == False).tuples()
+    reply_markup = keyboards.general_select_one_keyboard(_, statuses)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    bot.answer_callback_query(query_id)
+    return enums.ADMIN_REGISTERED_USERS_PERMS
+
+
+def enter_settings_registered_users(_, bot, chat_id, perm, msg_id, query_id, page=1, msg=None):
     if not msg:
         msg = _('👩 Registered users')
-    registered_perms = (UserPermission.OWNER, UserPermission.NOT_REGISTERED, UserPermission.PENDING_REGISTRATION)
-    users = User.select(User.username, User.id).join(UserPermission) \
-        .where(UserPermission.permission.not_in(registered_perms), User.banned == False).tuples()
+    users = User.select(User.username, User.id).where(User.permission == perm, User.banned == False).tuples()
+    # users = User.select(User.username, User.id).join(UserPermission) \
+    #     .where(UserPermission.permission.not_in(registered_perms), User.banned == False).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, users, page_num=page)
     bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     bot.answer_callback_query(query_id)

@@ -1078,6 +1078,15 @@ def create_product_price_group_selected_keyboard(trans, group_id):
     return InlineKeyboardMarkup(buttons)
 
 
+def price_group_clients_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('🗝 Edit Permissions'), callback_data='perms')],
+        [InlineKeyboardButton(_('👩 Edit Clients'), callback_data='clients')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
 def create_product_price_type_keyboard(trans):
     _ = trans
     buttons = [

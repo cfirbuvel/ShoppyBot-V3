@@ -89,6 +89,8 @@ class UserPermission(BaseModel):
 
 # class LogisticManagerPermission(BaseModel):
 #     permission =
+class GroupProductCount(BaseModel):
+    name = CharField()
 
 
 class User(BaseModel):
@@ -100,6 +102,7 @@ class User(BaseModel):
     banned = BooleanField(default=False)
     registration_time = DateTimeField(default=datetime.datetime.now)
     currency = CharField(default=Currencies.DOLLAR, choices=Currencies.CHOICES)
+    group_price = ForeignKeyField(GroupProductCount, null=True, related_name='users')
 
     @property
     def is_admin(self):
@@ -148,10 +151,6 @@ class ChannelPermissions(BaseModel):
 
 class ProductCategory(BaseModel):
     title = CharField(unique=True)
-
-
-class GroupProductCount(BaseModel):
-    name = CharField()
 
 
 class GroupProductCountPermission(BaseModel):
