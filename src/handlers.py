@@ -468,7 +468,7 @@ def on_chat_send(bot, update, user_data):
             return states.enter_menu(bot, update, user_data)
         for msg_type in ('photo', 'video', 'text'):
             msg_data = getattr(update.message, msg_type)
-            if msg_data is not None:
+            if msg_data:
                 break
         status_msg = _('Message has been sent.')
         if msg_type in ('photo', 'video'):

@@ -173,7 +173,7 @@ def enter_pending_registrations(_, bot, chat_id, msg_id, query_id, page=1, msg=N
     users = User.select(User.username, User.id).join(UserPermission) \
         .where(UserPermission.permission == UserPermission.PENDING_REGISTRATION, User.banned == False).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, users, page_num=page)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_PENDING_REGISTRATIONS
 

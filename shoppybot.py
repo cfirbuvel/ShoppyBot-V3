@@ -580,6 +580,9 @@ def main():
             enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS: [
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients, pattern='^(back|done|select)', pass_user_data=True)
             ],
+            enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_USERS: [
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients_users, pattern='^(back|done|select)', pass_user_data=True)
+            ],
             enums.ADMIN_PRODUCT_PRICE_GROUP_CHANGE: [
                 MessageHandler(Filters.text, admin_handlers.on_admin_product_price_group_change, pass_user_data=True),
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_group_change, pattern='^back', pass_user_data=True)

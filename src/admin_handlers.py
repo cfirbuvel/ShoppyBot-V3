@@ -1652,7 +1652,7 @@ def on_pending_registrations_approve(bot, update, user_data):
             msg = user_trans('{}, your registration has been approved. Your status is {}').format(username, perm_display)
             reply_markup = keyboards.start_btn(_)
             bot.send_message(user.telegram_id, msg, reply_markup=reply_markup)
-            msg = _('User\'s *{}* registration approved!').format(username)
+            msg = _('User\'s @{} registration approved!').format(username)
             page = user_data['listing_page']
             del user_data['user_select']
             return states.enter_pending_registrations(_, bot, chat_id, msg_id, query.id, page=page, msg=msg)
@@ -4145,7 +4145,7 @@ def on_admin_product_price_group_selected(bot, update, user_data):
             special_clients.append((perm.get_permission_display(), perm.id, is_picked))
             if is_picked:
                 selected_ids.append(perm.id)
-        user_data['admin_special_clients'] = {'group_id': val, 'selected_ids': selected_ids}
+        user_data['admin_special_clients'] = {'group_id': val, 'selected_perms': selected_ids}
         reply_markup = keyboards.general_select_keyboard(_, special_clients)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
@@ -4233,7 +4233,7 @@ def on_admin_product_price_group_clients(bot, update, user_data):
             UserPermission.VIP_CLIENT
         ]
         permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
-        selected_ids = user_data['admin_special_clients']['selected_ids']
+        selected_ids = user_data['admin_special_clients']['selected_perms']
         val = int(val)
         if val in selected_ids:
             selected_ids.remove(val)
@@ -4252,12 +4252,71 @@ def on_admin_product_price_group_clients(bot, update, user_data):
         if action == 'done':
             group = GroupProductCount.get(id=group_id)
             GroupProductCountPermission.delete().where(GroupProductCountPermission.price_group == group).execute()
-            for perm_id in user_data['admin_special_clients']['selected_ids']:
+            perms = []
+            for perm_id in user_data['admin_special_clients']['selected_perms']:
                 perm = UserPermission.get(id=perm_id)
                 GroupProductCountPermission.create(permission=perm, price_group=group)
-        return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
+                perms.append(perm)
+            users = User.select().where(User.permission.in_(perms)).order_by(User.permission)
+            user_choices = []
+            selected_ids = []
+            for user in users:
+                name = '{} - {}'.format(user.username, user.permission.get_permission_display())
+                user_choices.append((name, user.id, True))
+                selected_ids.append(user.id)
+            user_data['admin_special_clients']['selected_users'] = selected_ids
+            msg = _('Please select users for price group {}').format(group.name)
+            reply_markup = keyboards.general_select_keyboard(_, user_choices)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            query.answer()
+            return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_USERS
+        else:
+            return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
     else:
         return states.enter_unknown_command(_, bot, query)
+
+
+@user_passes
+def on_admin_product_price_group_clients_users(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    selected_ids = user_data['admin_special_clients']['selected_users']
+    group_id = user_data['admin_special_clients']['group_id']
+    group = GroupProductCount.get(id=group_id)
+    if action in ('page', 'select'):
+        perms_ids = user_data['admin_special_clients']['selected_perms']
+        perms = UserPermission.select().where(UserPermission.id.in_(perms_ids))
+        users = User.select().where(User.permission.in_(list(perms))).order_by(User.permission)
+        if action == 'select':
+            page = 1
+            val = int(val)
+            if val in selected_ids:
+                selected_ids.remove(val)
+            else:
+                selected_ids.append(val)
+        else:
+            page = int(val)
+        user_choices = []
+        for user in users:
+            name = '{} - {}'.format(user.username, user.permission.get_permission_display())
+            is_picked = user.id in selected_ids
+            user_choices.append((name, user.id, is_picked))
+        user_data['admin_special_clients']['selected_users'] = selected_ids
+        msg = _('Please select users for price group {}').format(group.name)
+        reply_markup = keyboards.general_select_keyboard(_, user_choices, page_num=page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_USERS
+    elif action == 'done':
+        users = User.select().where(User.id.in_(selected_ids))
+        for user in users:
+            user.group_price = group
+            user.save()
+        del user_data['admin_special_clients']
+        return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
 
 
 @user_passes

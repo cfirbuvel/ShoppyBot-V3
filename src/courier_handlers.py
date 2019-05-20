@@ -143,7 +143,7 @@ def on_courier_chat_send(bot, update, user_data):
             return states.enter_courier_main_menu(_, bot, chat_id, user, order)
         for msg_type in ('text', 'photo', 'video'):
             msg_data = getattr(update.message, msg_type)
-            if msg_data is not None:
+            if msg_data:
                 break
         status_msg = _('Message has been sent.')
         if msg_type in ('video', 'photo'):

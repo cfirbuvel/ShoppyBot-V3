@@ -93,6 +93,11 @@ class GroupProductCount(BaseModel):
     name = CharField()
 
 
+class GroupProductCountPermission(BaseModel):
+    price_group = ForeignKeyField(GroupProductCount, related_name='permissions')
+    permission = ForeignKeyField(UserPermission, related_name='group_counts')
+
+
 class User(BaseModel):
     username = CharField(null=True)
     telegram_id = IntegerField()
@@ -151,11 +156,6 @@ class ChannelPermissions(BaseModel):
 
 class ProductCategory(BaseModel):
     title = CharField(unique=True)
-
-
-class GroupProductCountPermission(BaseModel):
-    price_group = ForeignKeyField(GroupProductCount, related_name='permissions')
-    permission = ForeignKeyField(UserPermission, related_name='group_counts')
 
 
 class Product(BaseModel):
