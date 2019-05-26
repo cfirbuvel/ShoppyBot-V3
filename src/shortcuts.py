@@ -1,5 +1,7 @@
 from collections import defaultdict
 import datetime
+from string import ascii_uppercase
+import random
 import operator
 import time
 from peewee import JOIN
@@ -8,7 +10,7 @@ from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
 from telegram.ext.dispatcher import run_async
 
-from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, get_full_product_info, get_currency_symbol,\
+from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, get_currency_symbol,\
     get_service_channel
 from .btc_wrapper import CurrencyConverter, wallet_enable_hd
 from .cart_helper import Cart
@@ -16,7 +18,8 @@ from .cart_helper import Cart
 from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission,\
     UserIdentificationAnswer, Product, ProductCategory, WorkingHours, Currencies, User, CurrencyRates, \
     BitcoinCredentials, Channel, ChannelPermissions, Location, CourierChatMessage, CourierChat, \
-    GroupProductCount, GroupProductCountPermission
+    GroupProductCount, GroupProductCountPermission, ProductGroupCount, UserGroupCount, Lottery, LotteryParticipant, \
+    LotteryPermission
 from . import keyboards, messages, states
 
 
@@ -38,7 +41,9 @@ def send_order_identification_answers(bot, chat_id, order, send_one=False, chann
     photos_answers = []
     photos = []
     class_map = {'photo': InputMediaPhoto, 'video': InputMediaVideo}
+    print('answer debug')
     for answer in order.identification_answers:
+        print(answer)
         type = answer.stage.type
         content = answer.content
         question = answer.question.content
@@ -122,18 +127,6 @@ def send_user_identification_answers(bot, chat_id, user):
     return send_identification_answers(answers, bot, chat_id)
 
 
-def send_product_info(bot, product, chat_id, trans):
-    if product.group_price:
-        product_prices = product.group_price.product_counts
-    else:
-        product_prices = product.product_counts
-    product_prices = ((obj.count, obj.price) for obj in product_prices)
-    send_product_media(bot, product, chat_id)
-    msg = messages.create_admin_product_description(trans, product.title, product_prices)
-    bot.send_message(chat_id,
-                     text=msg)
-
-
 def initialize_calendar(_, bot, user_data, chat_id, state, message_id=None, query_id=None, msg=None, cancel=False):
     current_date = datetime.date.today()
     year, month = current_date.year, current_date.month
@@ -154,10 +147,12 @@ def initialize_calendar(_, bot, user_data, chat_id, state, message_id=None, quer
     return state
 
 
-def initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query_id, msg, cancel=False):
-    current_time = datetime.datetime.now()
-    hour, minute = current_time.hour, current_time.minute
-    user_data['time_picker'] = {'hour': hour, 'minute': minute, 'msg': msg, 'cancel': cancel, 'state': state}
+def initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query_id, msg, time_range, cancel=False):
+    start_time = time_range[0]
+    hour, minute = start_time.hour, start_time.minute
+    user_data['time_picker'] = {
+        'hour': hour, 'minute': minute, 'msg': msg, 'cancel': cancel, 'state': state, 'range': time_range
+    }
     reply_markup = keyboards.time_picker_keyboard(_, hour, minute, cancel)
     if msg_id:
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
@@ -168,17 +163,17 @@ def initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query_id, 
     return state
 
 
-def check_order_now_allowed():
-    now = datetime.datetime.now()
+def check_order_datetime_allowed(dtime):
     res = True
     try:
-        working_day = WorkingHours.get(day=now.weekday())
+        working_day = WorkingHours.get(day=dtime.weekday())
     except WorkingHours.DoesNotExist:
         res = False
     else:
-        open_time = now.replace(hour=working_day.open_time.hour, minute=working_day.open_time.minute, second=0)
-        close_time = now.replace(hour=working_day.close_time.hour, minute=working_day.close_time.minute, second=0)
-        if not open_time <= now < close_time:
+        close_time = working_day.close_time
+        close_time = datetime.datetime(year=dtime.year, month=dtime.month, day=dtime.day, hour=close_time.hour, minute=close_time.minute)
+        close_time = close_time - datetime.timedelta(minutes=30)
+        if not dtime < close_time:
             res = False
     return res
 
@@ -195,71 +190,16 @@ def calculate_delivery_fee(delivery_method, location, total, is_vip):
     return 0
 
 
-def get_order_subquery(first_date=None, second_date=None, year=None, month=None):
+def get_date_subquery(model, first_date=None, second_date=None, year=None, month=None):
     if first_date and second_date:
-        query = [Order.date_created >= first_date, Order.date_created <= second_date]
+        query = [model.date_created >= first_date, model.date_created <= second_date]
     elif year and month:
-        query = [Order.date_created.year == year, Order.date_created.month == month]
+        query = [model.date_created.year == year, model.date_created.month == month]
     elif year:
-        query = [Order.date_created.year == year]
+        query = [model.date_created.year == year]
     else:
         raise ValueError('Incorrect arguments')
     return query
-
-
-def get_order_count_and_price(orders):
-    _ = get_channel_trans()
-    currency = get_currency_symbol()
-    # orders = Order.select().where(*subqueries)
-    orders_count = orders.count()
-    total_price = 0
-    products_count = {}
-    stats_text = ''
-    count_text = _('Count')
-    price_text = _('Price')
-    orders_ids = [order.id for order in orders]
-    orders_items = OrderItem.select().join(Order).where(Order.id.in_(orders_ids))
-    for order_item in orders_items:
-        total_price += order_item.total_price
-        title, count, price = order_item.product.title, order_item.count, order_item.total_price
-        try:
-            if products_count[title]:
-                products_count[title][count_text] += count
-                products_count[title][price_text] += price
-        except KeyError:
-            products_count[title] = {count_text: count, price_text: price}
-    for title, data in products_count.items():
-        title = escape_markdown(title)
-        stats_text += _('\nProduct: ')
-        stats_text += title
-        stats_text += '\n'
-        for k, v in data.items():
-            if k == price_text:
-                v = '{}{}'.format(v, currency)
-            text = '{} = {}'.format(k, v)
-            stats_text += text
-            stats_text += '\n'
-    locations = defaultdict(int)
-    for order in orders:
-        if order.location:
-            locations[order.location.title] += order.delivery_fee
-        else:
-            locations['All locations'] += order.delivery_fee
-    locations = sorted([(title, total) for  title, total in locations.items()], key=lambda x: x[1])
-    locations_str = ''
-    for title, total in locations:
-        if total:
-            title = escape_markdown(title)
-            locations_str += '{}: {}{}'.format(title, total, currency)
-            locations_str += '\n'
-            total_price += total
-    if locations_str:
-        stats_text += '\n'
-        stats_text += _('Delivery fees:')
-        stats_text += '\n'
-        stats_text += locations_str
-    total_price = '{}{}'.format(total_price, currency)
-    return orders_count, total_price, stats_text
 
 
 def check_order_products_credits(order, courier=None):
@@ -391,13 +331,15 @@ def send_product_media(bot, product, chat_id):
     return messages_ids
 
 
-def send_products(_, bot, user_data, chat_id, products, currency):
+def send_products(_, bot, user_data, chat_id, products, user):
+    currency = user.currency
     msgs_ids = []
     for product in products:
         product_id = product.id
         product_count = Cart.get_product_count(user_data, product_id)
-        subtotal = Cart.get_product_subtotal(user_data, product_id)
-        product_title, prices = get_full_product_info(product_id)
+        price_group = Cart.get_product_price_group(product, user)
+        subtotal = Cart.get_product_subtotal(user_data, product, price_group)
+        product_title, prices = get_full_product_info(product, price_group)
         media_ids = send_product_media(bot, product, chat_id)
         msgs_ids += media_ids
         msg = messages.create_product_description(_, currency, product_title, prices, product_count, subtotal)
@@ -407,24 +349,51 @@ def send_products(_, bot, user_data, chat_id, products, currency):
     return msgs_ids
 
 
+def get_all_product_counts(product):
+    if product.price_groups:
+        price_groups = [group.price_group for group in product.price_groups]
+        counts = ProductCount.select().where(ProductCount.price_group.in_(price_groups))
+        print('group debug')
+    else:
+        counts = ProductCount.select().where(ProductCount.product == product)
+        print('simple')
+    print(counts)
+    counts = set([item.count for item in counts])
+    counts = list(counts)
+    counts.sort()
+    return counts
+
+
 def get_users_products(user, category=None):
     db_query = (
-        (GroupProductCountPermission.permission == user.permission)
-        | (GroupProductCountPermission.price_group.is_null(True))
-        | (User.group_price.is_null(False))
+        (UserGroupCount.user == user)
+        | ((GroupProductCountPermission.permission == user.permission) & (UserGroupCount.price_group.is_null(True)))
+        | ((GroupProductCountPermission.price_group.is_null(True)) & (UserGroupCount.price_group.is_null(True)))
     )
     user_group_prices = GroupProductCount.select().join(GroupProductCountPermission, JOIN.LEFT_OUTER) \
-        .switch(GroupProductCount).join(User, JOIN.LEFT_OUTER).where(db_query).group_by(GroupProductCount.id)
+        .switch(GroupProductCount).join(UserGroupCount, JOIN.LEFT_OUTER).where(db_query).group_by(GroupProductCount.id)
     user_group_prices = list(user_group_prices)
-    print(user_group_prices)
-    db_query = (
-        (Product.group_price.in_(user_group_prices)) | (Product.group_price.is_null(True))
-    )
+    print('debug groups')
+    for ugp in user_group_prices:
+        print(ugp.name)
+    db_query = (ProductGroupCount.price_group.is_null(True) | ProductGroupCount.price_group.in_(user_group_prices))
     db_query = [Product.is_active == True, db_query]
     if category:
         db_query.append(Product.category == category)
-    products = Product.select().where(*db_query).group_by(Product.id)
+    products = Product.select().join(ProductGroupCount).where(*db_query).group_by(Product.id)
+    print('prods debug')
+    print(list(products))
     return products
+
+
+def get_full_product_info(product, price_group):
+    product_title = product.title
+    if price_group:
+        query = (ProductCount.price_group == price_group)
+    else:
+        query = (ProductCount.product == product)
+    rows = ProductCount.select(ProductCount.count, ProductCount.price).where(query).tuples()
+    return product_title, rows
 
 
 def send_menu_msg(_, bot, user, products_info, chat_id, msg_id=None, query_id=None):
@@ -477,7 +446,7 @@ def send_menu_msg(_, bot, user, products_info, chat_id, msg_id=None, query_id=No
 
 def send_channel_msg(bot, msg, chat_id, keyboard=None, order=None, parse_mode=ParseMode.MARKDOWN,):
     params = {
-        'chat_id': chat_id, 'text': msg, 'parse_mode': parse_mode
+        'chat_id': chat_id, 'text': msg, 'parse_mode': parse_mode, 'timeout': 20
     }
     if keyboard:
         params['reply_markup'] = keyboard
@@ -488,20 +457,21 @@ def send_channel_msg(bot, msg, chat_id, keyboard=None, order=None, parse_mode=Pa
 
 
 def send_channel_photo(bot, photo, chat_id, caption=None, order=None):
-    sent_msg = bot.send_photo(chat_id, photo, caption)
+    sent_msg = bot.send_photo(chat_id, photo, caption, timeout=20)
     sent_msg_id = str(sent_msg['message_id'])
     ChannelMessageData.create(channel=str(chat_id), msg_id=sent_msg_id, order=order)
     return sent_msg_id
 
 
 def send_channel_video(bot, video, chat_id, caption=None, order=None):
-    sent_msg = bot.send_video(chat_id, video, caption)
+    sent_msg = bot.send_video(chat_id, video, caption, timeout=20)
     sent_msg_id = str(sent_msg['message_id'])
     ChannelMessageData.create(channel=str(chat_id), msg_id=sent_msg_id, order=order)
     return sent_msg_id
 
+
 def send_channel_location(bot, chat_id, lat, lng, order=None):
-    sent_msg = bot.send_location(chat_id, lat, lng)
+    sent_msg = bot.send_location(chat_id, lat, lng, timeout=20)
     sent_msg_id = str(sent_msg['message_id'])
     ChannelMessageData.create(channel=str(chat_id), msg_id=sent_msg_id, order=order)
     return sent_msg_id
@@ -509,7 +479,7 @@ def send_channel_location(bot, chat_id, lat, lng, order=None):
 
 def edit_channel_msg(bot, msg, chat_id, msg_id, keyboard=None, order=None, parse_mode=ParseMode.MARKDOWN):
     params = {
-        'chat_id': chat_id, 'message_id': msg_id, 'text': msg, 'parse_mode': parse_mode
+        'chat_id': chat_id, 'message_id': msg_id, 'text': msg, 'parse_mode': parse_mode, 'timeout': 20
     }
     if keyboard:
         params['reply_markup'] = keyboard
@@ -530,7 +500,7 @@ def edit_channel_msg(bot, msg, chat_id, msg_id, keyboard=None, order=None, parse
 
 def delete_channel_msg(bot, chat_id, msg_id):
     try:
-        bot.delete_message(chat_id, msg_id)
+        bot.delete_message(chat_id, msg_id, timeout=20)
     except TelegramError:
         pass
     try:
@@ -542,7 +512,7 @@ def delete_channel_msg(bot, chat_id, msg_id):
 
 
 def send_channel_media_group(bot, chat_id, media, order=None):
-    msgs = bot.send_media_group(chat_id, media)
+    msgs = bot.send_media_group(chat_id, media, timeout=20)
     msgs_ids = [str(msg['message_id']) for msg in msgs]
     chat_id = str(chat_id)
     for msg_id in msgs_ids:
@@ -554,25 +524,30 @@ def delete_order_channels_msgs(bot, order):
     msgs = ChannelMessageData.select().where(ChannelMessageData.order == order)
     for msg in msgs:
         try:
-            bot.delete_message(msg.channel, msg.msg_id)
+            bot.delete_message(msg.channel, msg.msg_id, timeout=20)
         except TelegramError:
             pass
         msg.delete_instance()
 
 
-def get_product_prices_str(trans, product):
-    _ = trans
-    group_price = product.group_price
+def get_product_prices_str(_, product):
+    currency = get_currency_symbol()
+    price_groups = product.price_groups
     prices_str = _('Current prices:\n')
-    if group_price:
-        group_name = escape_markdown(group_price.name)
-        prices_str += _('Product price group:\n_{}_').format(group_name)
-        prices_str += '\n\n'
-        product_counts = ProductCount.select().where(ProductCount.product_group == group_price)
+    if price_groups:
+        for group in price_groups:
+            group = group.price_group
+            group_name = escape_markdown(group.name)
+            prices_str += _('Product price group:\n_{}_').format(group_name)
+            prices_str += '\n'
+            product_counts = ProductCount.select(ProductCount.count, ProductCount.price)\
+                .where(ProductCount.price_group == group).tuples()
+            for count, price in product_counts:
+                prices_str += _('x {} = {}{}\n').format(count, price, currency)
+            prices_str += '\n\n'
     else:
-        product_counts = product.product_counts
-    for price in product_counts:
-        prices_str += _('x {} = {}{}\n').format(price.count, price.price, get_currency_symbol())
+        for product_count in product.product_counts:
+            prices_str += _('x {} = {}{}\n').format(product_count.count, product_count.price, currency)
     return prices_str
 
 
@@ -668,28 +643,123 @@ def send_chat_msg(_, bot, db_msg, chat_id, msg_id=None, read=False):
     db_msg.save()
 
 
+def generate_lottery_code(all_codes):
+    while True:
+        new_code = random.choices(ascii_uppercase, k=5)
+        new_code = ''.join(new_code)
+        if new_code not in all_codes:
+            return new_code
 
-# def courier_get_order(_, order_id):
-#     try:
-#         order = Order.get(id=order_id)
-#     except Order.DoesNotExist:
-#         logger.info('Order № {} not found!'.format(order_id))
-#         msg = _('Order #{} does not exist.')
-#         order = None
-#     else:
-#         if order.status == Order.CANCELLED:
-#             msg = _('Order #{} was cancelled.')
-#             order = None
-#         else:
-#             msg = None
-#     return order, msg
+@run_async
+def manage_lottery_participants(bot):
+    try:
+        lottery = Lottery.get(completed_date=None)
+    except Lottery.DoesNotExist:
+        return
+    while not lottery.completed_date:
+        tickets = LotteryParticipant.select() \
+            .where(LotteryParticipant.is_pending == False, LotteryParticipant.lottery == lottery)
+        tickets_used = tickets.count()
+        tickets_diff = lottery.num_tickets - tickets_used
+        if tickets_diff:
+            try:
+                pending_participant = LotteryParticipant.select().where(LotteryParticipant.is_pending == True) \
+                    .order_by(LotteryParticipant.created_date.asc()).get()
+            except LotteryParticipant.DoesNotExist:
+                pass
+            else:
+                LotteryParticipant.update({LotteryParticipant.lottery: lottery, LotteryParticipant.is_pending: False}) \
+                    .where(LotteryParticipant.id == pending_participant.id).execute()
+                all_codes = [ticket.code for ticket in tickets if ticket.code]
+                code = generate_lottery_code(all_codes)
+                pending_participant.code = code
+                pending_participant.save()
+                user = pending_participant.user
+                _ = get_trans(user.telegram_id)
+                msg = _('{}, you have been added to lottery №{}').format(user.username, lottery.id)
+                msg += '\n'
+                msg += _('Lottery code: {}').format(code)
+                bot.send_message(user.user_id, msg)
+                continue
+
+        time.sleep(15)
+        lottery = Lottery.get(id=lottery.id)
 
 
+@run_async
+def send_lottery_messages(bot):
+    while config.lottery_messages:
+        last_sent_date = config.lottery_messages_sent
+        if last_sent_date:
+            now = datetime.datetime.now()
+            interval = datetime.timedelta(minutes=config.lottery_messages_interval)
+            time_remains = (last_sent_date + interval) - now
+            if time_remains.days >= 0:
+                time.sleep(time_remains.total_seconds())
+            if not config.lottery_messages:
+                break
+        permissions = UserPermission.get_clients_permissions()
+        channels_skip = ('service_channel', 'couriers_channel', 'reviews_channel')
+        channels = Channel.select().join(ChannelPermissions, JOIN.LEFT_OUTER)\
+            .where(ChannelPermissions.permission.in_(permissions), Channel.conf_name.not_in(channels_skip))\
+            .group_by(Channel.id)
+        _ = get_channel_trans()
+        for channel in channels:
+            channel_permissions = [item.permission for item in channel.permissions]
+            completed_lottery = Lottery.select().join(LotteryPermission)\
+                .where(Lottery.completed_date.is_null(False), LotteryPermission.permission.in_(channel_permissions))
+            if completed_lottery.exists():
+                completed_lottery = completed_lottery.get()
+                msg = messages.create_completed_lottery_channel_msg(_, completed_lottery)
+                bot.send_message(channel.channel_id, msg, parse_mode=ParseMode.MARKDOWN, timeout=20)
+        active_lottery = Lottery.select().where(Lottery.completed_date == None, Lottery.active == True)
+        if active_lottery.exists():
+            active_lottery = active_lottery.get()
+            lottery_permissions = [item.permission for item in active_lottery.permissions]
+            channels = Channel.select().join(ChannelPermissions, JOIN.LEFT_OUTER)\
+                .where(Channel.conf_name.not_in(channels_skip), ChannelPermissions.permission.in_(lottery_permissions))\
+                .group_by(Channel.id)
+            for channel in channels:
+                msg = messages.create_lottery_channel_msg(_, active_lottery)
+                bot.send_message(channel.channel_id, msg, parse_mode=ParseMode.MARKDOWN, timeout=20)
+        now = datetime.datetime.now()
+        config.set_datetime_value('lottery_messages_sent', now)
 
-# def black_list_user(_, bot, user):
-#     user.banned = True
-#     user.save()
-#     user_trans = get_trans(user.telegram_id)
-#     msg = user_trans('{}, you have been black-listed').format(user.username)
-#     bot.send_message(user.telegram_id, msg)
-#     msg = _('*{}* has been added to black-list!').format(username)
+
+def check_lottery_available(order):
+    try:
+        lottery = Lottery.get(completed_date=None, active=True)
+    except Lottery.DoesNotExist:
+        return
+    lottery_permissions = [item.permission for item in lottery.permissions]
+    if not order.user.permission in lottery_permissions:
+        return
+    is_participant = LotteryParticipant.select() \
+        .where(LotteryParticipant.lottery == lottery, LotteryParticipant.participant == order.user).exists()
+    if is_participant:
+        return
+    if lottery.products_condition in (Lottery.SINGLE_PRODUCT, Lottery.CATEGORY):
+        order_products = [order_item.product for order_item in order.order_items]
+        if lottery.products_condition == Lottery.SINGLE_PRODUCT:
+            if lottery.single_product_condition not in order_products:
+                return
+        else:
+            order_categories = [product.category for product in order_products]
+            if lottery.category_condition not in order_categories:
+                return
+        if lottery.by_condition == Lottery.PRICE:
+            if order.total_cost < lottery.min_price:
+                return
+    return True
+
+
+def add_client_to_lottery(lottery, user, all_codes, is_pending=False):
+    code = generate_lottery_code(all_codes)
+    LotteryParticipant.create(lottery=lottery, participant=user, code=code, is_pending=is_pending)
+    user_trans = get_trans(user.telegram_id)
+    msg = user_trans('{}, you have been added to lottery №{}').format(user.username, lottery.id)
+    msg += '\n'
+    msg += user_trans('Lottery code: {}').format(code)
+    return code, msg
+
+

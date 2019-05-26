@@ -4,6 +4,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandl
 
 from src import admin_handlers, courier_handlers, handlers, enums, shortcuts
 from src.helpers import config, get_user_id, get_channel_trans
+from src.shortcuts import send_lottery_messages, manage_lottery_participants
 
 # from src.shortcuts import on_drop_order, make_confirm, make_unconfirm
 
@@ -35,7 +36,8 @@ def main():
             CallbackQueryHandler(handlers.on_chat_with_courier, pattern='^client_chat', pass_user_data=True),
             CallbackQueryHandler(handlers.on_open_chat_msg, pattern='^client_read_msg', pass_user_data=True),
             CallbackQueryHandler(courier_handlers.on_open_chat_msg, pattern='^courier_read_msg', pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_client_waiting_keyboard, pattern='^courier_ping', pass_user_data=True)
+            CallbackQueryHandler(courier_handlers.on_client_waiting_keyboard, pattern='^courier_ping', pass_user_data=True),
+            CallbackQueryHandler(handlers.on_client_order_delivered, pattern='^delivered_order', pass_user_data=True)
         ],
         states={
             enums.BOT_INIT: [
@@ -87,8 +89,8 @@ def main():
                 MessageHandler(Filters.text | Filters.photo | Filters.video, handlers.on_registration_identification,
                                pass_user_data=True)
             ],
-            enums.BOT_PHONE_NUMBER: [
-                MessageHandler(Filters.text | Filters.contact, handlers.on_registration_phone_number,
+            enums.BOT_IDENTIFICATION_PHONE: [
+                MessageHandler(Filters.text | Filters.contact, handlers.on_registration_identification_phone,
                                pass_user_data=True)
             ],
             enums.BOT_CHANNELS: [
@@ -104,7 +106,7 @@ def main():
                                      pass_user_data=True),
             ],
             enums.BOT_CHECKOUT_ADDRESS: [
-                MessageHandler(Filters.text, handlers.on_order_delivery_address,
+                MessageHandler(Filters.text | Filters.location, handlers.on_order_delivery_address,
                                pass_user_data=True)
             ],
             enums.BOT_CHECKOUT_DATETIME_SELECT: [
@@ -123,15 +125,19 @@ def main():
                 CallbackQueryHandler(handlers.on_order_time_select, pattern='^(done|back|cancel)',
                                      pass_user_data=True)
             ],
-            enums.BOT_CHECKOUT_PHONE_NUMBER: [
-                MessageHandler(Filters.contact | Filters.text,
-                               handlers.on_order_phone_number, pass_user_data=True),
-            ],
+            # enums.BOT_CHECKOUT_PHONE_NUMBER: [
+            #     MessageHandler(Filters.contact | Filters.text,
+            #                    handlers.on_order_phone_number, pass_user_data=True),
+            # ],
             enums.BOT_CHECKOUT_IDENTIFY: [
                 CallbackQueryHandler(handlers.on_order_identification, pattern='^(back|cancel)',
                                      pass_user_data=True),
                 MessageHandler(Filters.text | Filters.photo | Filters.video, handlers.on_order_identification,
                                pass_user_data=True)
+            ],
+            enums.BOT_CHECKOUT_IDENTIFY_PHONE: [
+                 MessageHandler(Filters.contact | Filters.text,
+                                handlers.on_order_identification_phone_number, pass_user_data=True),
             ],
             enums.BOT_CHECKOUT_PAYMENT_TYPE: [
                 CallbackQueryHandler(handlers.on_order_payment_type, pattern='^(btc|delivery|back|cancel)',
@@ -191,6 +197,16 @@ def main():
             enums.BOT_PRODUCT_CATEGORIES: [
                 CallbackQueryHandler(handlers.on_product_categories, pattern='^(back|page|select)', pass_user_data=True)
             ],
+            enums.BOT_ORDER_DELIVERED: [
+                CallbackQueryHandler(handlers.on_client_order_delivered, pattern='^delivered_order', pass_user_data=True)
+            ],
+            enums.BOT_ORDER_REVIEW: [
+                CallbackQueryHandler(handlers.on_order_review, pattern='^review', pass_user_data=True)
+            ],
+            enums.BOT_ORDER_REVIEW_FEW_WORDS: [
+                CallbackQueryHandler(handlers.on_order_review_few_words, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, handlers.on_order_review_few_words, pass_user_data=True)
+            ],
             #
             # admin states
             #
@@ -244,9 +260,6 @@ def main():
             enums.ADMIN_STATISTICS_TOP_CLIENTS: [
                 CallbackQueryHandler(admin_handlers.on_statistics_top_clients, pattern='^(back|top)', pass_user_data=True)
             ],
-            enums.ADMIN_STATISTICS_TOP_CLIENTS_SELECT: [
-                CallbackQueryHandler(admin_handlers.on_top_users_select, pattern='^(select|back)', pass_user_data=True)
-            ],
             enums.ADMIN_STATISTICS_TOP_CLIENTS_PRODUCT: [
                 CallbackQueryHandler(admin_handlers.on_top_users_by_product, pattern='^(back|page|select)', pass_user_data=True)
             ],
@@ -256,10 +269,6 @@ def main():
             enums.ADMIN_STATISTICS_TOP_CLIENTS_DATE: [
                 CallbackQueryHandler(handlers.on_calendar_change, pattern='^calendar', pass_user_data=True),
                 CallbackQueryHandler(admin_handlers.on_top_by_date, pattern='^(back|year|month|day)', pass_user_data=True)
-            ],
-            enums.ADMIN_STATISTICS_TOP_CLIENTS_ORDER_SELECT: [
-                CallbackQueryHandler(admin_handlers.on_statistics_top_clients_order_select, pattern='^(back|page|select)',
-                                     pass_user_data=True)
             ],
             enums.ADMIN_BOT_SETTINGS: [
                 CallbackQueryHandler(admin_handlers.on_bot_settings_menu, pattern='^bot_settings', pass_user_data=True)
@@ -358,7 +367,7 @@ def main():
                 MessageHandler(Filters.text, admin_handlers.on_product_edit_prices_text, pass_user_data=True),
             ],
             enums.ADMIN_PRODUCT_EDIT_PRICES_GROUP: [
-                CallbackQueryHandler(admin_handlers.on_product_edit_prices_group, pattern='^(back|page|select)', pass_user_data=True)
+                CallbackQueryHandler(admin_handlers.on_product_edit_prices_group, pattern='^(done|page|select)', pass_user_data=True)
             ],
             enums.ADMIN_PRODUCT_EDIT_MEDIA: [
                 MessageHandler(Filters.text | Filters.photo | Filters.video, admin_handlers.on_product_edit_media,
@@ -534,9 +543,16 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_admin_edit_identification_question_type, pattern='^(back|photo|text|video)',
                                      pass_user_data=True)
             ],
+            enums.ADMIN_EDIT_IDENTIFICATION_STAGES_TEXT: [
+                CallbackQueryHandler(admin_handlers.on_admin_edit_identification_text_type, pattern='^(back|phone|text|id)',
+                                     pass_user_data=True)
+            ],
             enums.ADMIN_EDIT_IDENTIFICATION_QUESTION: [
                 CallbackQueryHandler(admin_handlers.on_admin_edit_identification_question, pattern='^back', pass_user_data=True),
                 MessageHandler(Filters.text, admin_handlers.on_admin_edit_identification_question, pass_user_data=True)
+            ],
+            enums.ADMIN_EDIT_IDENTIFICATION_PERMISSIONS: [
+                CallbackQueryHandler(admin_handlers.on_admin_edit_identification_permissions, pattern='^(select|done)', pass_user_data=True)
             ],
             enums.ADMIN_DELIVERY: [
                 CallbackQueryHandler(admin_handlers.on_delivery, pattern='^(back|edit_methods|edit_fee)', pass_user_data=True)
@@ -575,7 +591,7 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_groups_list, pattern='^(back|page|select)', pass_user_data=True)
             ],
             enums.ADMIN_PRODUCT_PRICE_GROUP_SELECTED: [
-                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_selected, pattern='^(back|edit|special_clients|delete)', pass_user_data=True)
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_selected, pattern='^(back|edit|special_clients|users|delete)', pass_user_data=True)
             ],
             enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS: [
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients, pattern='^(back|done|select)', pass_user_data=True)
@@ -591,8 +607,8 @@ def main():
                 MessageHandler(Filters.text, admin_handlers.on_admin_product_price_group_prices, pass_user_data=True),
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_group_prices, pattern='^back|', pass_user_data=True)
             ],
-            enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_NEW: [
-                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients_new, pattern='^(done|select)', pass_user_data=True)
+            enums.ADMIN_PRODUCT_PRICE_GROUP_PERMISSIONS_NEW: [
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_permissions_new, pattern='^(done|select)', pass_user_data=True)
             ],
             enums.ADMIN_BTC_PAYMENTS: [
                 CallbackQueryHandler(admin_handlers.on_admin_btc_settings, pattern='^btc', pass_user_data=True)
@@ -611,6 +627,107 @@ def main():
             enums.ADMIN_SET_CURRENCIES_CONFIRM: [
                 CallbackQueryHandler(admin_handlers.on_admin_change_currency_confirm, pattern='^(yes|no)', pass_user_data=True)
             ],
+            enums.ADMIN_LOTTERY: [
+                CallbackQueryHandler(admin_handlers.on_lottery, pattern='^lottery', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_WINNERS: [
+                CallbackQueryHandler(admin_handlers.on_lottery_winners, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_SETTINGS: [
+                CallbackQueryHandler(admin_handlers.on_lottery_settings, pattern='^lottery', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_OFF_CONFIRM: [
+                CallbackQueryHandler(admin_handlers.on_lottery_off_confirm, pattern='^(yes|no)', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_WINNERS_NUM: [
+                CallbackQueryHandler(admin_handlers.on_lottery_winners_num, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_lottery_winners_num, pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_PARTICIPANTS: [
+                CallbackQueryHandler(admin_handlers.on_lottery_participants, pattern='^lottery', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_CONDITIONS: [
+                CallbackQueryHandler(admin_handlers.on_lottery_conditions, pattern='^lottery', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_PRODUCT_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_lottery_select_product, pattern='^(page|select|back)', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_AMOUNT_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_lottery_amount_select, pattern='^(select|back)', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_TICKETS_NUM: [
+                CallbackQueryHandler(admin_handlers.on_lottery_tickets_num, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_lottery_tickets_num, pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_PERMISSIONS: [
+                CallbackQueryHandler(admin_handlers.on_lottery_permissions, pattern='^(done|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_PARTICIPANTS_USERS: [
+                CallbackQueryHandler(admin_handlers.on_lottery_participants_users, pattern='^(done|select|page)',
+                                     pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_MIN_PRICE: [
+                CallbackQueryHandler(admin_handlers.on_lottery_min_price, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_lottery_min_price, pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_PRODUCTS_CONDITION: [
+                CallbackQueryHandler(admin_handlers.on_lottery_products_condition, pattern='^lottery', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_SINGLE_PRODUCT_CONDITION: [
+                CallbackQueryHandler(admin_handlers.on_lottery_single_product_condition, pattern='^(select|page|back)',
+                                     pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_CATEGORY_CONDITION: [
+                CallbackQueryHandler(admin_handlers.on_lottery_category_condition, pattern='^(select|page|back)',
+                                     pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_MESSAGES: [
+                CallbackQueryHandler(admin_handlers.on_lottery_messages, pattern='^lottery', pass_user_data=True)
+            ],
+            enums.ADMIN_LOTTERY_MESSAGES_INTERVAL: [
+                CallbackQueryHandler(admin_handlers.on_lottery_messages_interval, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_lottery_messages_interval, pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS: [
+                CallbackQueryHandler(admin_handlers.on_reviews, pattern='^reviews', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_PENDING: [
+                CallbackQueryHandler(admin_handlers.on_reviews_pending, pattern='^(back|select|page)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_PENDING_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_reviews_pending_select, pattern='^reviews', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_SHOW:[
+                CallbackQueryHandler(admin_handlers.on_reviews_show, pattern='^reviews', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_BY_DATE: [
+                CallbackQueryHandler(admin_handlers.on_reviews_by_date, pattern='^(year|month|day|back)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_BY_DATE_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_reviews_by_date_select, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_BY_CLIENT_PERMISSIONS: [
+                CallbackQueryHandler(admin_handlers.on_reviews_by_client_permissions, pattern='^(back|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_BY_CLIENT: [
+                CallbackQueryHandler(admin_handlers.on_reviews_by_client, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_BY_CLIENT_LIST: [
+                CallbackQueryHandler(admin_handlers.on_reviews_by_client_list, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_QUESTIONS: [
+                CallbackQueryHandler(admin_handlers.on_reviews_questions, pattern='^reviews', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_QUESTIONS_LIST: [
+                CallbackQueryHandler(admin_handlers.on_reviews_questions_list, pattern='^(back|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_QUESTIONS_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_reviews_questions_select, pattern='^(delete|back)', pass_user_data=True)
+            ],
+            enums.ADMIN_REVIEWS_QUESTIONS_NEW: [
+                CallbackQueryHandler(admin_handlers.on_reviews_questions_new, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_reviews_questions_new, pass_user_data=True)
+            ],
         },
         fallbacks=[
             CallbackQueryHandler(handlers.on_start, pattern='^start_bot',  pass_user_data=True),
@@ -620,9 +737,10 @@ def main():
             CallbackQueryHandler(handlers.on_chat_with_courier, pattern='^client_chat', pass_user_data=True),
             CallbackQueryHandler(handlers.on_open_chat_msg, pattern='^client_read_msg', pass_user_data=True),
             CallbackQueryHandler(courier_handlers.on_open_chat_msg, pattern='^courier_read_msg', pass_user_data=True),
-            CallbackQueryHandler(courier_handlers.on_client_waiting_keyboard, pattern='^courier_ping', pass_user_data=True)
+            CallbackQueryHandler(courier_handlers.on_client_waiting_keyboard, pattern='^courier_ping', pass_user_data=True),
+            CallbackQueryHandler(handlers.on_client_order_delivered, pattern='^delivered_order', pass_user_data=True)
         ])
-    updater = Updater(config.api_token, user_sig_handler=close_db_on_signal, workers=12)
+    updater = Updater(config.api_token, user_sig_handler=close_db_on_signal, workers=18)
     updater.dispatcher.add_handler(user_conversation_handler)
     updater.dispatcher.add_handler(
         CallbackQueryHandler(handlers.service_channel_courier_query_handler,
@@ -651,6 +769,8 @@ def main():
     ))
     updater.dispatcher.add_error_handler(handlers.on_error)
     start_orders_processing(updater.bot)
+    send_lottery_messages(updater.bot)
+    manage_lottery_participants(updater.bot)
     updater.start_polling()
     updater.idle()
 

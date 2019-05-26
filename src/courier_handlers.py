@@ -2,7 +2,7 @@ from telegram import ParseMode
 from telegram.utils.helpers import escape_markdown
 
 from .decorators import user_passes
-from .helpers import logger, config, get_channel_trans, get_trans, get_user_id, get_service_channel, get_couriers_channel
+from .helpers import logger, config, get_channel_trans, get_trans, get_user_id, get_service_channel
 from .models import Order, User, OrderBtcPayment, CourierChatMessage, CourierChat
 from . import shortcuts, enums, keyboards, messages, states
 
@@ -91,8 +91,8 @@ def on_courier_chat(bot, update, user_data):
         user_data['chat_order_id'] = order_id
         msg = _('Please send text, photo or video:')
         reply_markup = keyboards.cancel_button(_)
-        menu_msg = bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
-        chat.courier_menu_id = menu_msg['message_id']
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        chat.courier_menu_id = None
         chat.save()
         query.answer()
         return enums.COURIER_STATE_CHAT_SEND
@@ -174,7 +174,6 @@ def on_courier_chat_send(bot, update, user_data):
         else:
             bot.send_message(client_id, msg, reply_markup=reply_markup)
         chat.user_menu_id = None
-        bot.delete_message(chat_id, chat.courier_menu_id)
         msg = _('⌨️ Chat with client')
         reply_markup = keyboards.chat_with_client_keyboard(_, order_id)
         menu_msg = bot.send_message(chat_id, msg, reply_markup=reply_markup)
@@ -225,9 +224,6 @@ def on_open_chat_msg(bot, update, user_data):
     chat_msg.save()
     msg = _('⌨️ Chat with client')
     reply_markup = keyboards.chat_with_client_keyboard(_, chat.order.id)
-    # if chat.courier_menu_id:
-    #     menu_msg = bot.edit_message_text(msg, chat_id, chat.courier_menu_id, reply_markup=reply_markup)
-    # else:
     if not chat.courier_menu_id:
         menu_msg = bot.send_message(chat_id, msg, reply_markup=reply_markup)
         chat.courier_menu_id = menu_msg['message_id']
@@ -350,10 +346,18 @@ def on_courier_confirm_order(bot, update, user_data):
         msg = _('Order №{} was delivered by {} @{}\n').format(order.id, status, user.username)
         msg += _('Client: @{}').format(order.user.username)
         service_channel = get_service_channel()
-        reply_markup = keyboards.order_finished_keyboard(_, order_id)
+        lottery_available = shortcuts.check_lottery_available(order)
+        reply_markup = keyboards.order_finished_keyboard(_, order_id, lottery_available)
         msg_id = shortcuts.send_channel_msg(bot, msg, service_channel, keyboard=reply_markup, order=order, parse_mode=None)
         order.order_text_msg_id = msg_id
         order.save()
+        user = order.user
+        _ = get_trans(user.telegram_id)
+        msg = _('Order №{} is completed.').format(order.id)
+        msg += '\n'
+        msg += _('We would love to hear about your experience with our products and service')
+        reply_markup = keyboards.client_order_finished_keyboard(_, order_id, lottery_available)
+        bot.send_message(user.telegram_id, msg, reply_markup=reply_markup)
         query.answer()
         return enums.BOT_INIT
         # return states.enter_menu(bot, update, user_data)

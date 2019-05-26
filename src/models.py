@@ -86,16 +86,28 @@ class UserPermission(BaseModel):
     def get_permission_display(self):
         return dict(self.PERMISSIONS)[self.permission]
 
+    @staticmethod
+    def get_clients_permissions():
+        clients_permissions = [
+            UserPermission.AUTHORIZED_RESELLER, UserPermission.FAMILY, UserPermission.FRIEND,
+            UserPermission.VIP_CLIENT, UserPermission.CLIENT
+        ]
+        permissions = UserPermission.select().where(UserPermission.permission.in_(clients_permissions))
+        return permissions
+
+    @staticmethod
+    def get_users_permissions():
+        users_permissions = [
+            UserPermission.AUTHORIZED_RESELLER, UserPermission.FAMILY, UserPermission.FRIEND,
+            UserPermission.VIP_CLIENT, UserPermission.CLIENT, UserPermission.NOT_REGISTERED,
+            UserPermission.PENDING_REGISTRATION
+        ]
+        users_permissions = UserPermission.select().where(UserPermission.permission.in_(users_permissions))
+        return users_permissions
+
 
 # class LogisticManagerPermission(BaseModel):
 #     permission =
-class GroupProductCount(BaseModel):
-    name = CharField()
-
-
-class GroupProductCountPermission(BaseModel):
-    price_group = ForeignKeyField(GroupProductCount, related_name='permissions')
-    permission = ForeignKeyField(UserPermission, related_name='group_counts')
 
 
 class User(BaseModel):
@@ -107,7 +119,8 @@ class User(BaseModel):
     banned = BooleanField(default=False)
     registration_time = DateTimeField(default=datetime.datetime.now)
     currency = CharField(default=Currencies.DOLLAR, choices=Currencies.CHOICES)
-    group_price = ForeignKeyField(GroupProductCount, null=True, related_name='users')
+    # group_price = ForeignKeyField(GroupProductCount, null=True, related_name='users')
+    # group_perm = ForeignKeyField(GroupProductCountPermission, null=True, related_name='users')
 
     @property
     def is_admin(self):
@@ -134,6 +147,9 @@ class User(BaseModel):
         return self.permission.permission == UserPermission.COURIER
 
 
+    # user = ForeignKeyField(User, related_name='group_permissions')
+
+
 class CourierLocation(BaseModel):
     location = ForeignKeyField(Location, related_name='couriers')
     user = ForeignKeyField(User, related_name='locations')
@@ -158,26 +174,46 @@ class ProductCategory(BaseModel):
     title = CharField(unique=True)
 
 
+class GroupProductCount(BaseModel):
+    name = CharField()
+
+
 class Product(BaseModel):
     title = CharField()
     is_active = BooleanField(default=True)
     credits = IntegerField(default=0)
     warehouse_active = BooleanField(default=False)
     category = ForeignKeyField(ProductCategory, related_name='products', null=True)
-    group_price = ForeignKeyField(GroupProductCount, related_name='products', null=True)
+    # group_price = ForeignKeyField(GroupProductCount, related_name='products', null=True)
+
+
+class ProductGroupCount(BaseModel):
+    product = ForeignKeyField(Product, related_name='price_groups')
+    price_group = ForeignKeyField(GroupProductCount, related_name='products')
+
+
+class UserGroupCount(BaseModel):
+    user = ForeignKeyField(User, related_name='price_groups')
+    price_group = ForeignKeyField(GroupProductCount, related_name='users')
+
+
+class GroupProductCountPermission(BaseModel):
+    price_group = ForeignKeyField(GroupProductCount, related_name='permissions')
+    permission = ForeignKeyField(UserPermission, related_name='price_groups')
+    # product = ForeignKeyField(Product, related_name='group_counts')
+
+
+class ProductCount(BaseModel):
+    product = ForeignKeyField(Product, related_name='product_counts', null=True)
+    price_group = ForeignKeyField(GroupProductCount, related_name='product_counts', null=True)
+    count = IntegerField()
+    price = DecimalField()
 
 
 class ProductMedia(BaseModel):
     product = ForeignKeyField(Product, related_name='product_media')
     file_id = CharField()
     file_type = CharField(null=True)
-
-
-class ProductCount(BaseModel):
-    product = ForeignKeyField(Product, related_name='product_counts', null=True)
-    product_group = ForeignKeyField(GroupProductCount, related_name='product_counts', null=True)
-    count = IntegerField()
-    price = DecimalField()
 
 
 class ProductWarehouse(BaseModel):
@@ -209,17 +245,18 @@ class Order(BaseModel):
     user = ForeignKeyField(User, related_name='user_orders')
     courier = ForeignKeyField(User, related_name='courier_orders', null=True)
     shipping_method = IntegerField(default=PICKUP, choices=DELIVERY_METHODS)
-    shipping_time = DateTimeField()
+    shipping_time = CharField()
     location = ForeignKeyField(Location, null=True)
     status = IntegerField(default=CONFIRMED, choices=STATUSES)
     client_notified = BooleanField(default=False)
     date_created = DateTimeField(default=datetime.datetime.now)
-    address = CharField(default='')
-    phone_number = CharField(default='')
+    address = CharField(default='', null=True)
+    # phone_number = CharField(default='', null=True)
     total_cost = DecimalField(default=0)
     btc_payment = BooleanField(default=False)
     coordinates = CharField(null=True)
     delivery_fee = DecimalField(default=0)
+    discount = DecimalField(default=0)
 
     # refactor this?
     order_hidden_text = TextField(default='')
@@ -272,10 +309,16 @@ class OrderItem(BaseModel):
 
 class IdentificationStage(BaseModel):
     active = BooleanField(default=True)
-    vip_required = BooleanField(default=False)
+    # vip_required = BooleanField(default=False)
+    # permission = ForeignKeyField(UserPermission, related_name='id_stages')
     for_order = BooleanField(default=False)
     type = CharField()
     # actual_type = CharField()
+
+
+class IdentificationPermission(BaseModel):
+    stage = ForeignKeyField(IdentificationStage, related_name='permissions')
+    permission = ForeignKeyField(UserPermission, related_name='id_stages')
 
 
 class IdentificationQuestion(BaseModel):
@@ -344,6 +387,86 @@ class CourierChatMessage(BaseModel):
     date_created = DateTimeField(default=datetime.datetime.now)
 
 
+class Lottery(BaseModel):
+    PRODUCT = 1
+    PRICE = 2
+    CATEGORY = 1
+    ALL_PRODUCTS = 2
+    SINGLE_PRODUCT = 3
+    BY = (
+        (PRODUCT, 'Product'), (PRICE, 'Price')
+    )
+    PRODUCTS = (
+        (SINGLE_PRODUCT, 'Single Product'), (CATEGORY, 'Category'), (ALL_PRODUCTS, 'All products')
+    )
+    active = BooleanField(default=False)
+    created_date = DateTimeField(default=datetime.datetime.now)
+    completed_date = DateTimeField(null=True)
+    num_codes = IntegerField(default=0)
+    num_tickets = IntegerField(default=0)
+    by_condition = IntegerField(choices=BY, default=PRODUCT)
+    products_condition = IntegerField(choices=PRODUCTS, default=ALL_PRODUCTS)
+    category_condition = ForeignKeyField(ProductCategory, null=True)
+    single_product_condition = ForeignKeyField(Product, null=True)
+    min_price = DecimalField(null=True)
+    prize_product = ForeignKeyField(Product, null=True)
+    prize_count = IntegerField(null=True)
+    # message_sent_date = DateTimeField(null=True)
+
+    @property
+    def could_activate(self):
+        condition = [self.num_codes, self.num_tickets, self.prize_product, self.prize_count]
+        return all(condition)
+
+    @property
+    def by_condition_display(self):
+        return dict(self.BY)[self.by_condition]
+
+    @property
+    def products_condition_display(self):
+        return dict(self.PRODUCTS)[self.products_condition]
+
+
+class LotteryPermission(BaseModel):
+    lottery = ForeignKeyField(Lottery, related_name='permissions')
+    permission = ForeignKeyField(UserPermission, related_name='lotteries')
+
+
+class LotteryParticipant(BaseModel):
+    is_winner = BooleanField(default=False)
+    code = CharField()
+    participant = ForeignKeyField(User, related_name='lotteries')
+    lottery = ForeignKeyField(Lottery, related_name='participants', null=True)
+    is_pending = BooleanField(default=False)
+    created_date = DateTimeField(default=datetime.datetime.now)
+
+
+class Review(BaseModel):
+    user = ForeignKeyField(User, related_name='reviews')
+    order = ForeignKeyField(Order, related_name='reviews')
+    # product_rank = IntegerField(default=5)
+    # delivery_rank = IntegerField(default=5)
+    text = CharField(null=True)
+    date_created = DateTimeField(default=datetime.datetime.now)
+    is_pending = BooleanField(default=True)
+
+
+class ReviewQuestion(BaseModel):
+    text = CharField()
+    # conf_name = CharField()
+
+
+class ReviewQuestionRank(BaseModel):
+    question = ForeignKeyField(ReviewQuestion)
+    review = ForeignKeyField(Review)
+    rank = IntegerField(default=5)
+
+
+class Task(BaseModel):
+    LOTTERY_MESSAGES = 1
+
+
+
 def create_tables():
     try:
         db.connect()
@@ -357,7 +480,8 @@ def create_tables():
             Order, OrderItem, ProductWarehouse, ProductMedia, IdentificationStage,
             OrderIdentificationAnswer, IdentificationQuestion, ChannelMessageData, GroupProductCount,
             CurrencyRates, BitcoinCredentials, OrderBtcPayment, BtcProc, ConfigValue, UserIdentificationAnswer, CourierLocation,
-            WorkingHours, GroupProductCountPermission, CourierChat, CourierChatMessage
+            WorkingHours, GroupProductCountPermission, CourierChat, CourierChatMessage, IdentificationPermission,
+            Lottery, LotteryParticipant, LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion, ReviewQuestionRank
         ], safe=True
     )
 

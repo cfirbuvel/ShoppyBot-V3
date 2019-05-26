@@ -2,10 +2,12 @@ from collections import defaultdict
 from datetime import datetime
 
 from telegram.utils.helpers import escape_markdown
+from peewee import JOIN
 
 from .cart_helper import Cart
-from .helpers import get_trans, calculate_discount_percents, config, quantize_btc, get_currency_symbol
-from .models import Location, Currencies, BtcStatus, OrderBtcPayment, BtcStage, WorkingHours, User
+from .helpers import get_trans, calculate_discount_percents, config, quantize_btc, get_currency_symbol, get_channel_trans
+from .models import Location, Currencies, BtcStatus, OrderBtcPayment, BtcStage, WorkingHours, User, ProductCount, \
+    Lottery, LotteryParticipant, ReviewQuestionRank, Order, OrderItem
 from .btc_wrapper import CurrencyConverter
 
 
@@ -117,16 +119,32 @@ def create_product_description(_, currency, product_title, product_prices, produ
     return text
 
 
-def create_admin_product_description(trans, product_title, product_prices):
-    _ = trans
+def create_admin_product_description(_, product):
     currency = get_currency_symbol()
-    product_title = escape_markdown(product_title)
-    text = _('Product:\n{}\n\n~~\nPrice:\n').format(product_title)
-    for q, price in product_prices:
-        text += '\n'
-        text += _('x {} = {}{}').format(q, price, currency)
-    text += '\n\n~~\n'
-    return text
+    msg = _('Product: {}').format(product.title)
+    msg += '\n\n'
+    msg += _('Prices:')
+    product_counts = product.product_counts
+    if product_counts:
+        msg += '\n'
+        msg += _('Default prices:')
+        for p_count in product_counts:
+            count, price = p_count.count, p_count.price
+            msg += '\n'
+            msg += _('x {} = {}{}').format(count, price, currency)
+    price_groups = product.price_groups
+    if price_groups:
+        for price_group in price_groups:
+            price_group = price_group.price_group
+            prices = ProductCount.select(ProductCount.count, ProductCount.price)\
+                .where(ProductCount.price_group == price_group).tuples()
+            msg += '\n'
+            msg += _('Price group: {}').format(price_group.name)
+            for count, price in prices:
+                msg += '\n'
+                msg += _('x {} = {}{}').format(count, price, currency)
+    msg += '\n~~\n'
+    return msg
 
 
 def create_confirmation_text(user_id, order_details, total, products_info, delivery_fee):
@@ -138,8 +156,6 @@ def create_confirmation_text(user_id, order_details, total, products_info, deliv
     text += _('Items in cart:')
     text += '\n'
 
-    # change currency
-    # currency = config.currency
     user = User.get(telegram_id=user_id)
     currency = user.currency
     currency_symbol = Currencies.CURRENCIES[currency][1]
@@ -153,25 +169,8 @@ def create_confirmation_text(user_id, order_details, total, products_info, deliv
         text += '\n'
     text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
 
-    # is_vip = user.is_vip_client
-    # delivery_method = order_details['delivery']
     btc_payment = order_details.get('btc_payment')
-    # calculated_fee = 0
-    # if delivery_method == 'delivery':
-    #     loc_id = order_details.get('location_id')
-    #     if loc_id:
-    #         location = Location.get(id=loc_id)
-    #     else:
-    #         location = None
-    #     if location and location.delivery_fee is not None:
-    #         delivery_fee, delivery_min = location.delivery_fee, location.delivery_min
-    #     else:
-    #         delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
-    #     if total < delivery_min or delivery_min == 0:
-    #         if not is_vip or config.delivery_fee_for_vip:
-    #             calculated_fee = CurrencyConverter.convert_currencies(delivery_fee, config.currency, currency)
-    #             text += '\n'
-    #             text += _('Delivery Fee: {}{}').format(calculated_fee, currency_symbol)
+
     if delivery_fee:
         text += '\n'
         text += _('Delivery Fee: {}{}').format(delivery_fee, currency_symbol)
@@ -245,8 +244,6 @@ def create_service_notice(_, order, btc_data=None, for_courier=False):
     text += _('Items in cart:')
     text += '\n'
 
-    # total = 0
-
     user = order.user
     for order_item in order.order_items:
         title = escape_markdown(order_item.product.title)
@@ -255,37 +252,34 @@ def create_service_notice(_, order, btc_data=None, for_courier=False):
         text += '\n'
         text += _('x {} = {}{}').format(order_item.count, order_item.total_price, currency)
         text += '\n'
-        # total += order_item.total_price
 
-    # is_vip = user.is_vip_client
-    # if order.shipping_method == order.DELIVERY:
-    #     shipping_loc = order.location
-    #     if shipping_loc and shipping_loc.delivery_fee is not None:
-    #         delivery_fee, delivery_min = shipping_loc.delivery_fee, shipping_loc.delivery_min
-    #     else:
-    #         delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
-    #     if total < delivery_min or delivery_min == 0:
-    #         if not is_vip or config.delivery_fee_for_vip:
-    #             text += '\n'
-    #             text += _('Delivery Fee: {}{}').format(delivery_fee, currency)
-    # else:
-    #     delivery_fee = 0
     total = order.total_cost
 
-    discount = config.discount
-    discount_min = config.discount_min
-    if discount_min != 0:
-        discount_num = calculate_discount_percents(discount, total)
-        if discount_num and total >= discount_min:
-            if not discount.endswith('%'):
-                discount_str = '{}'.format(discount)
-                discount_str += '{}'.format(currency)
-                total -= int(discount)
-            else:
-                discount_str = discount
-                total -= discount_num
-            text += '\n'
-            text += _('Discount: {}').format(discount_str)
+    conf_discount = config.discount
+    discount_num = order.discount
+    if discount_num:
+        if not conf_discount.endswith('%'):
+            discount_str = '{}'.format(conf_discount)
+            discount_str += '{}'.format(currency)
+            total -= int(discount_num)
+        else:
+            discount_str = conf_discount
+            total -= discount_num
+        text += '\n'
+        text += _('Discount: {}').format(discount_str)
+    # discount_min = config.discount_min
+    # if discount_min != 0:
+    #     discount_num = calculate_discount_percents(discount, total)
+    #     if discount_num and total >= discount_min:
+    #         if not discount.endswith('%'):
+    #             discount_str = '{}'.format(discount)
+    #             discount_str += '{}'.format(currency)
+    #             total -= int(discount)
+    #         else:
+    #             discount_str = discount
+    #             total -= discount_num
+    #         text += '\n'
+    #         text += _('Discount: {}').format(discount_str)
 
     total += order.delivery_fee
 
@@ -328,13 +322,15 @@ def create_service_notice(_, order, btc_data=None, for_courier=False):
         text += _('Address: ')
         text += escape_markdown(order.address)
         text += '\n'
-    shipping_time_str = order.shipping_time.strftime('%b %d, %Y (%A) %H:%M')
+    shipping_time = order.shipping_time
+    if type(shipping_time) == datetime:
+        shipping_time = order.shipping_time.strftime('%b %d, %Y (%A) %H:%M')
     text += _('When: ')
-    text += shipping_time_str
+    text += shipping_time
     text += '\n'
-    if not for_courier and order.phone_number:
-        text += _('Phone number: ')
-        text += order.phone_number
+    # if not for_courier and order.phone_number:
+    #     text += _('Phone number: ')
+    #     text += order.phone_number
     return text
 
 
@@ -403,4 +399,195 @@ def get_working_hours_msg(_):
         open_time, close_time = hours.open_time.strftime(time_format), hours.close_time.strftime(time_format)
         msg += '\n'
         msg += '{}: `{}-{}`'.format(_(hours.get_day_display()), open_time, close_time)
+    return msg
+
+
+def create_just_completed_lottery_msg(_, lottery, winners):
+    product_title = escape_markdown(lottery.prize_product.title)
+    msg = _('Lottery №{} just completed!').format(lottery.id)
+    msg += '\n'
+    msg += _('〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️')
+    msg += '\n'
+    msg += _('Prize: *x{} {}*').format(lottery.prize_count, product_title)
+    msg += '\n'
+    msg += '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️'
+    msg += '\n'
+    msg += _('Winning codes: {}').format(', '.join(winner.code for winner in winners))
+    msg += '\n'
+    msg += '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️'
+    msg += '\n'
+    msg += _('Winners:')
+    for count, winner in enumerate(winners, 1):
+        username = escape_markdown(winner.participant.username)
+        msg += '\n'
+        msg += '{}. @{} with code {}'.format(count, username, winner.code)
+    return msg
+
+
+def create_completed_lottery_channel_msg(_, lottery):
+    last_winners = LotteryParticipant.select() \
+        .where(LotteryParticipant.lottery == lottery, LotteryParticipant.is_winner == True)
+    product_title = escape_markdown(lottery.prize_product.title)
+    msg = _('Lottery №{} results:').format(lottery.id)
+    msg += '\n'
+    msg += _('〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️')
+    msg += '\n'
+    msg += _('Prize: *x{} {}*').format(lottery.prize_count, product_title)
+    msg += '\n'
+    msg += '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️'
+    msg += '\n'
+    msg += _('Lottery winners:')
+    for count, winner in enumerate(last_winners, 1):
+        username = escape_markdown(winner.participant.username)
+        msg += '\n'
+        msg += '{}. @{}'.format(count, username)
+    return msg
+
+
+def create_lottery_channel_msg(_, lottery):
+    tickets_used = LotteryParticipant.select() \
+        .where(LotteryParticipant.is_pending == False, LotteryParticipant.lottery == lottery).count()
+    tickets_left = lottery.num_tickets - tickets_used
+    product_title = escape_markdown(lottery.prize_product.title)
+    msg = _('Lottery №{} is running now').format(lottery.id)
+    msg += '\n'
+    msg += '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰'
+    msg += '\n'
+    msg += _('Prize: *x{} {}*').format(lottery.prize_count, product_title)
+    msg += '\n'
+    msg += _('There are *{}* tickets left').format(tickets_left)
+    if not tickets_left:
+        msg += '\n'
+        msg += _('You can participate in queue for this or next lottery')
+    msg += '\n'
+    msg += '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰'
+    msg += '\n'
+    if lottery.products_condition == Lottery.SINGLE_PRODUCT:
+        product_title = escape_markdown(lottery.single_product_condition.title)
+        msg += _('Please purchase *{}*').format(product_title)
+    elif lottery.products_condition == Lottery.CATEGORY:
+        category_title = escape_markdown(lottery.category_condition.title)
+        msg += _('Please purchase products in category *{}*').format(category_title)
+    else:
+        msg += _('Please purchase any product')
+    msg += '\n'
+    if lottery.by_condition == Lottery.PRICE:
+        msg += _('For *{}{}* or more').format(lottery.min_price, get_currency_symbol())
+        msg += '\n'
+    msg += _('To take part in this lottery!')
+    return msg
+
+
+def create_review_msg(_, review):
+    order = review.order
+    msg = _('Review №{}').format(review.id)
+    msg += '\n'
+    msg += _('User: @{}, Order №{}').format(review.user.username, order.id)
+    msg += '\n'
+    msg += _('Products:')
+    for order_item in order.order_items:
+        msg += '\n'
+        msg += 'x{} {}'.format(order_item.count, order_item.product.title)
+    msg += '\n'
+    msg += '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️'
+    ranks = ReviewQuestionRank.select().where(ReviewQuestionRank.review == review)
+    for rank in ranks:
+        question_text = rank.question.text
+        rank_str = '⭐️' * rank.rank
+        msg += '\n'
+        msg += '{}: {}'.format(question_text, rank_str)
+    if review.text:
+        msg += '\n'
+        msg += '〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️〰️'
+        msg += '\n'
+        msg += _('Review:')
+        msg += '\n'
+        msg += review.text
+    return msg
+
+
+def get_order_count_and_price(orders):
+    _ = get_channel_trans()
+    currency = get_currency_symbol()
+    orders_count = orders.count()
+    total_price = 0
+    products_count = {}
+    stats_text = ''
+    count_text = _('Count')
+    price_text = _('Price')
+    orders_ids = [order.id for order in orders]
+    orders_items = OrderItem.select().join(Order).where(Order.id.in_(orders_ids))
+    if orders_items.exists():
+        for order_item in orders_items:
+            total_price += order_item.total_price
+            title, count, price = order_item.product.title, order_item.count, order_item.total_price
+            try:
+                if products_count[title]:
+                    products_count[title][count_text] += count
+                    products_count[title][price_text] += price
+            except KeyError:
+                products_count[title] = {count_text: count, price_text: price}
+        for title, data in products_count.items():
+            title = escape_markdown(title)
+            stats_text += _('Product: ')
+            stats_text += title
+            stats_text += '\n'
+            for k, v in data.items():
+                if k == price_text:
+                    v = '{}{}'.format(v, currency)
+                text = '{} = {}'.format(k, v)
+                stats_text += text
+                stats_text += '\n'
+            stats_text += '\n'
+        stats_text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
+        stats_text += '\n'
+    total_discount = 0
+    locations = defaultdict(int)
+    for order in orders:
+        if order.location:
+            locations[order.location.title] += order.delivery_fee
+        else:
+            locations['All locations'] += order.delivery_fee
+        total_discount += order.discount
+    locations = sorted([(title, total) for title, total in locations.items()], key=lambda x: x[1])
+    locations_str = ''
+    for title, total in locations:
+        if total:
+            title = escape_markdown(title)
+            locations_str += '{}: {}{}'.format(title, total, currency)
+            locations_str += '\n'
+            total_price += total
+    if locations_str:
+        stats_text += _('Delivery fees:')
+        stats_text += '\n'
+        stats_text += locations_str
+
+        stats_text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
+        stats_text += '\n'
+
+    stats_text += _('Total Discount: {}{}').format(total_discount, currency)
+
+    went_to_lottery = LotteryParticipant.select().join(User, JOIN.LEFT_OUTER)\
+        .join(Order, JOIN.LEFT_OUTER, on=Order.user).where(Order.id.in_(orders_ids)).count()
+
+    stats_text += '\n'
+    stats_text += _('Total went to lottery: {}').format(went_to_lottery)
+
+    total_price -= total_discount
+    total_price = '{}{}'.format(total_price, currency)
+    return orders_count, total_price, stats_text
+
+
+def create_statistics_msg(_, orders):
+    count, price, product_text = get_order_count_and_price(orders)
+    msg = '\n\n'
+    msg += _('Count: {}').format(count)
+    msg += '\n'
+    msg += '〰〰〰〰〰〰〰〰〰〰〰〰️'
+    msg += '\n'
+    msg += product_text
+    msg += '\n'
+    msg += '〰〰〰〰〰〰〰〰〰〰〰〰️'
+    msg += '\n'
+    msg += _('*Total cost: {}*').format(price)
     return msg

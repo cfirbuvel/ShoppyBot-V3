@@ -53,7 +53,10 @@ class ConfigHelper:
                       'delivery_fee_for_vip': 'false', 'discount': '0',
                       'discount_min': '0', 'btc_enabled': 'false',
                       'btc_address': '', 'currency': Currencies.DOLLAR,
-                      'currencies_api_key': '7405b1ae5a19aefdad05fe182b8e62b7'})
+                      'currencies_api_key': '7405b1ae5a19aefdad05fe182b8e62b7',
+                      'lottery_messages': 'false',
+                      'lottery_messages_interval': '120',
+                      'lottery_messages_sent': ''})
         self.config.read(cfgfilename, encoding='utf-8')
         self.section = 'Settings'
 
@@ -108,6 +111,18 @@ class ConfigHelper:
         format = '%Y-%m-%d %H-%M-%S'
         value = value.strftime(format)
         self.set_value(name, value)
+
+    @property
+    def lottery_messages(self):
+        return self.get_config_value('lottery_messages', boolean=True)
+
+    @property
+    def lottery_messages_sent(self):
+        return self.get_datetime_value('lottery_messages_sent')
+
+    @property
+    def lottery_messages_interval(self):
+        return self.get_config_value('lottery_messages_interval', conversion=int)
 
     @property
     def currencies_api_key(self):
@@ -252,6 +267,20 @@ def calculate_discount_percents(discount, total):
     return int(discount)
 
 
+def calculate_discount(total):
+    discount = config.discount
+    discount_min = config.discount_min
+    if discount_min != 0:
+        discount = calculate_discount_percents(discount, total)
+        if discount and total >= discount_min:
+            return discount
+    return 0
+
+
+# def get_discount():
+#     discount = config.discount
+
+
 def quantize_btc(val):
     val = Decimal(val).quantize(Decimal('0.000001'))
     return val
@@ -313,20 +342,6 @@ def get_channel_trans():
     locale = config.channels_language
     print(locale)
     return gettext.gettext if locale == 'en' else cat.gettext
-
-
-def get_full_product_info(product_id):
-    try:
-        product = Product.get(id=product_id)
-    except Product.DoesNotExist:
-        return '', []
-    product_title = product.title
-    if product.group_price:
-        query = (ProductCount.product_group == product.group_price)
-    else:
-        query = (ProductCount.product == product)
-    rows = ProductCount.select(ProductCount.count, ProductCount.price).where(query).tuples()
-    return product_title, rows
 
 
 def get_currency_symbol():

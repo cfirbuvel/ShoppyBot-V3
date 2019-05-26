@@ -1,5 +1,6 @@
 import datetime
 from decimal import Decimal
+import time
 import random
 import re
 
@@ -13,12 +14,13 @@ from .cart_helper import Cart
 from .decorators import user_passes
 from .btc_wrapper import BtcWallet, BtcSettings, BtcError
 from .btc_processor import set_btc_proc, process_btc_payment
-from .helpers import get_user_id, get_username, get_locale, get_trans, config, logger, get_full_product_info, \
-    get_channel_trans, clear_user_data, get_service_channel, get_couriers_channel
+from .helpers import get_user_id, get_username, get_locale, get_trans, config, logger, \
+    get_channel_trans, clear_user_data, get_service_channel, get_couriers_channel, calculate_discount
 from .models import User, Product, ProductCategory, Order, Location, OrderBtcPayment, BitcoinCredentials, \
     Channel, UserPermission, IdentificationStage, IdentificationQuestion, UserIdentificationAnswer,\
     ChannelPermissions, WorkingHours, OrderIdentificationAnswer, BtcStage, ProductWarehouse, OrderItem,\
-    CourierLocation, Currencies, CourierChat, CourierChatMessage, GroupProductCount, GroupProductCountPermission
+    CourierLocation, Currencies, CourierChat, CourierChatMessage, GroupProductCount, GroupProductCountPermission,\
+    IdentificationPermission, Lottery, LotteryParticipant, Review, ReviewQuestion, ReviewQuestionRank
 
 
 @user_passes
@@ -74,7 +76,7 @@ def on_menu(bot, update, user_data):
                 products = shortcuts.get_users_products(user)
                 if products.exists():
                     bot.delete_message(chat_id, msg_id)
-                    products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
+                    products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user)
                     user_data['products_msgs'] = products_msgs
                     return states.enter_menu(bot, update, user_data, query_id=query.id)
                 else:
@@ -115,13 +117,13 @@ def on_menu(bot, update, user_data):
                         products_msgs = [cat_msg['message_id']]
                         products = shortcuts.get_users_products(user, cat)
                         if products.exists():
-                            products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
+                            products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user)
                             user_data['products_msgs'] = products_msgs
                         return states.enter_menu(bot, update, user_data, query.id)
                     else:
                         products = shortcuts.get_users_products(user)
                         if products.exists():
-                            products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
+                            products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user)
                             user_data['products_msgs'] = products_msgs
                         menu_msg_id = user_data['menu_id']
                         return states.enter_menu(bot, update, user_data, menu_msg_id, query.id)
@@ -202,26 +204,27 @@ def on_menu(bot, update, user_data):
                     products_msgs = [cat_msg['message_id']]
                     products = shortcuts.get_users_products(user, cat)
                     if products.exists():
-                        products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
+                        products_msgs += shortcuts.send_products(_, bot, user_data, chat_id, products, user)
                         user_data['products_msgs'] = products_msgs
                     return states.enter_menu(bot, update, user_data, menu_msg_id, query.id)
                 else:
                     products = shortcuts.get_users_products(user)
                     if products.exists():
-                        products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
+                        products_msgs = shortcuts.send_products(_, bot, user_data, chat_id, products, user)
                         user_data['products_msgs'] = products_msgs
                     return states.enter_menu(bot, update, user_data, menu_msg_id, query.id)
             product_count = Cart.get_product_count(user_data, product_id)
             if action == 'product_add':
-                user_data = Cart.add(user_data, product_id)
+                user_data = Cart.add(user_data, product_id, user)
             else:
-                user_data = Cart.remove(user_data, product_id)
+                user_data = Cart.remove(user_data, product_id, user)
             new_count = Cart.get_product_count(user_data, product_id)
             if product_count == new_count:
                 query.answer()
                 return enums.BOT_INIT
-            subtotal = Cart.get_product_subtotal(user_data, product_id)
-            product_title, prices = get_full_product_info(product_id)
+            price_group = Cart.get_product_price_group(product, user)
+            subtotal = Cart.get_product_subtotal(user_data, product, price_group)
+            product_title, prices = shortcuts.get_full_product_info(product, price_group)
             msg = messages.create_product_description(_, user.currency, product_title, prices, new_count, subtotal)
             reply_markup = keyboards.create_product_keyboard(_, product_id, user_data)
             bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
@@ -237,7 +240,10 @@ def on_menu(bot, update, user_data):
             bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
             return enums.BOT_MY_ORDERS
         elif data == 'menu_chat':
-            orders = Order.select().where(Order.user == user, Order.status == Order.PROCESSING).order_by(Order.date_created.desc())
+            orders = Order.select().join(User, JOIN.LEFT_OUTER, on=Order.courier) \
+                .where(Order.user == user, Order.status == Order.PROCESSING, User.permission == UserPermission.COURIER)\
+                .order_by(Order.date_created.desc())
+            # orders = Order.select().where(Order.user == user, Order.status == Order.PROCESSING).order_by(Order.date_created.desc())
             date_pattern = '%d-%m-%Y'
             orders = [('Order №{} {}'.format(order.id, order.date_created.strftime(date_pattern)), order.id) for order in orders]
             msg = _('Select an order')
@@ -363,8 +369,8 @@ def on_chat_with_courier(bot, update, user_data):
         user_data['chat_order_id'] = order_id
         msg = _('Please send text, photo or video:')
         reply_markup = keyboards.cancel_button(_)
-        menu_msg = bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
-        chat.user_menu_id = menu_msg['message_id']
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        chat.user_menu_id = None
         chat.save()
         query.answer()
         return enums.BOT_CHAT_SEND
@@ -411,32 +417,6 @@ def on_chat_with_courier(bot, update, user_data):
         msg += service_trans('Courier: @{} Client: @{}').format(courier.username, user.username)
         service_channel = get_service_channel()
         shortcuts.send_channel_msg(bot, msg, service_channel, parse_mode=None)
-        client_last_message = CourierChatMessage.select()\
-            .where(CourierChatMessage.chat == chat, CourierChatMessage.author == user)\
-            .order_by(CourierChatMessage.date_created.desc()).get()
-        last_messages = [client_last_message]
-        try:
-            courier_last_message = CourierChatMessage.select()\
-                .where(CourierChatMessage.chat == chat, CourierChatMessage.author == courier)\
-                .order_by(CourierChatMessage.date_created.desc()).get()
-            last_messages.append(courier_last_message)
-        except CourierChatMessage.DoesNotExist:
-            pass
-        msg = _('Last messages:')
-        shortcuts.send_channel_msg(bot, msg, service_channel, parse_mode=None)
-        for chat_msg in last_messages:
-            time_sent = chat_msg.date_created.strftime('%d %b %H:%M')
-            msg = _('{}\nFrom @{}:').format(time_sent, chat_msg.author.username)
-            msg_data = chat_msg.message
-            msg_type = chat_msg.msg_type
-            if msg_type == 'photo':
-                shortcuts.send_channel_photo(bot, msg_data, service_channel, caption=msg, order=order)
-            elif msg_type == 'video':
-                shortcuts.send_channel_video(bot, msg_data, service_channel, caption=msg, order=order)
-            else:
-                msg += '\n'
-                msg += msg_data
-                shortcuts.send_channel_msg(bot, msg, service_channel, order=order, parse_mode=None)
         shortcuts.check_courier_available(chat.id, bot)
         return enums.BOT_CHAT_SEND
 
@@ -493,7 +473,6 @@ def on_chat_send(bot, update, user_data):
                 .where(CourierChatMessage.author == user, CourierChatMessage.chat == chat, CourierChatMessage.replied == False).count()
             if unanswered_messages >= 2:
                 ping = True
-        bot.delete_message(chat_id, chat.user_menu_id)
         reply_markup = keyboards.chat_with_courier_keyboard(_, order_id, ping)
         menu_msg = bot.send_message(chat_id, msg, reply_markup=reply_markup)
         chat.user_menu_id = menu_msg['message_id']
@@ -504,7 +483,10 @@ def on_chat_send(bot, update, user_data):
         msg += '\n'
         msg += courier_trans('You have new message from client').format(user.username)
         reply_markup = keyboards.chat_courier_msg_keyboard(_, chat_msg.id)
-        bot.edit_message_text(msg, courier_id, chat.courier_menu_id, reply_markup=reply_markup)
+        if chat.courier_menu_id:
+            bot.edit_message_text(msg, courier_id, chat.courier_menu_id, reply_markup=reply_markup)
+        else:
+            bot.send_message(courier_id, msg, reply_markup=reply_markup)
         chat.courier_menu_id = None
         chat.save()
         return enums.BOT_CHAT_WITH_COURIER
@@ -547,14 +529,10 @@ def on_open_chat_msg(bot, update, user_data):
     chat_msg.read = True
     chat_msg.save()
     reply_markup = keyboards.chat_with_courier_keyboard(_, chat.order.id)
-    # if chat.user_menu_id:
-    #     menu_msg = bot.edit_message_text(msg, chat_id, chat.user_menu_id, reply_markup=reply_markup)
-    # else:
     if not chat.user_menu_id:
         menu_msg = bot.send_message(chat_id, msg, reply_markup=reply_markup)
         chat.user_menu_id = menu_msg['message_id']
         chat.save()
-    # user_data['answer_to_id'] = chat_msg.id
     return enums.BOT_CHAT_WITH_COURIER
 
 
@@ -595,8 +573,7 @@ def on_order_locations(bot, update, user_data):
         delivery_method = user_data['order_details']['delivery']
         user_data['order_details']['location_id'] = val
         if delivery_method == Order.PICKUP:
-            order_now = shortcuts.check_order_now_allowed()
-            return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, order_now, msg_id, query.id)
+            return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
         else:
             return states.enter_order_delivery_address(_, bot, chat_id, query.id)
     elif action == 'back':
@@ -619,15 +596,14 @@ def on_order_delivery_address(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id = update.effective_chat.id
-    answer = update.message.text
     delivery_method = user_data['order_details']['delivery']
-    if answer == _('📍 Allow to send my location'):
-        location = update.message.location
+    location = update.message.location
+    if location:
         loc = {'lat': location['latitude'], 'long': location['longitude']}
         user_data['order_details']['geo_location'] = loc
-        order_now = shortcuts.check_order_now_allowed()
-        return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, order_now)
-    elif answer == _('↩ Back'):
+        return states.enter_order_shipping_time(_, bot, chat_id)
+    answer = update.message.text
+    if answer == _('↩ Back'):
         locations_exist = Location.select().exists()
         if locations_exist:
             return states.enter_order_locations(_, bot, chat_id, delivery_method)
@@ -643,8 +619,7 @@ def on_order_delivery_address(bot, update, user_data):
         user_data['order_details']['address'] = answer
         msg = _('✅ Address set')
         bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
-        order_now = shortcuts.check_order_now_allowed()
-        return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, order_now)
+        return states.enter_order_shipping_time(_, bot, chat_id)
 
 
 @user_passes
@@ -656,11 +631,41 @@ def on_order_datetime_select(bot, update, user_data):
     action = query.data
     if action == 'now':
         now = datetime.datetime.now()
-        user_data['order_details']['datetime'] = now
-        return states.enter_order_phone_number(_, bot, chat_id, query.id)
+        if not shortcuts.check_order_datetime_allowed(now):
+            msg = _('Cannot make order today.')
+            msg += '\n'
+            msg += messages.get_working_hours_msg(_)
+            return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id, msg)
+        user_data['order_details']['datetime'] = 'now'
+        user = User.get(telegram_id=user_id)
+        now = datetime.datetime.now()
+        id_stages = None
+        if not user.is_registered:
+            id_stages = IdentificationStage.select().where(IdentificationStage.active == True)
+        elif now - datetime.timedelta(hours=24) > user.registration_time:
+            if not Order.select().where(Order.user == User).exists():
+                id_stages = IdentificationStage.select().join(IdentificationPermission)\
+                    .where(IdentificationStage.for_order == True, IdentificationStage.active == True,
+                           IdentificationPermission.permission == user.permission)
+        if id_stages and id_stages.exists():
+            print(list(id_stages))
+            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
+        if BitcoinCredentials.select().first().enabled:
+            return states.enter_order_payment_type(_, bot, chat_id)
+        else:
+            return states.enter_order_confirmation(_, bot, chat_id, user_data, user_id)
+        # return states.enter_order_phone_number(_, bot, chat_id, query.id)
+        # msg = _('Please select time you\'d like to take order')
+        # reply_markup = keyboards.order_select_time_today_keyboard(_)
+        # bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        # query.answer()
+        # return enums.BOT_CHECKOUT_TODAY_TIME_SELECT
     elif action == 'datetime':
-        delivery_method = user_data['order_details']['delivery']
-        return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, False, msg_id, query.id)
+        msg = _('Please select day')
+        msg += '\n'
+        msg += messages.get_working_hours_msg(_)
+        state = enums.BOT_CHECKOUT_DATE_SELECT
+        return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id, msg, cancel=True)
     elif action == 'back':
         delivery_method = user_data['order_details']['delivery']
         if delivery_method == Order.DELIVERY:
@@ -676,6 +681,42 @@ def on_order_datetime_select(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+# @user_passes
+# def on_order_today_time_select(bot, update, user_data):
+#     user_id = get_user_id(update)
+#     _ = get_trans(user_id)
+#     query = update.callback_query
+#     chat_id, msg_id = query.message.chat_id, query.message.message_id
+#     action = query.data
+#     if action == 'closest':
+#         user_data['order_details']['datetime'] = 'closest'
+#         return states.enter_order_phone_number(_, bot, chat_id, query.id)
+#     elif action == 'pick':
+#         now = datetime.datetime.now()
+#         user_data['order_details']['datetime'] = now
+#         msg = _('Please select time')
+#         msg += '\n\n'
+#         msg += messages.get_working_hours_msg(_)
+#         try:
+#             open_time = WorkingHours.get(day=now.weekday()).open_time
+#         except WorkingHours.DoesNotExist:
+#             msg = _('Cannot make order today.')
+#             msg += '\n'
+#             msg += messages.get_working_hours_msg(_)
+#             return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id, msg)
+#         now_time = datetime.time(hour=now.hour, minute=now.minute)
+#         start_time = max([now_time, open_time])
+#         state = enums.BOT_CHECKOUT_TIME_SELECT
+#         return shortcuts.initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query.id, msg, start_time, cancel=True)
+#     elif action == 'back':
+#         return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
+#     else:
+#         msg = _('Order was cancelled')
+#         bot.edit_message_text(msg, chat_id, msg_id)
+#         query.answer()
+#         return states.enter_menu(bot, update, user_data)
+
+
 @user_passes
 def on_order_date_select(bot, update, user_data):
     user_id = get_user_id(update)
@@ -686,45 +727,45 @@ def on_order_date_select(bot, update, user_data):
     if action == 'day':
         day = int(val)
         year, month = user_data['calendar']['year'], user_data['calendar']['month']
-        # order_date = datetime.date(year=year, month=month, day=day)
         now = datetime.datetime.now()
         order_datetime = now.replace(year=year, month=month, day=day)
         if order_datetime < now:
             msg = _('Delivery date can\'t be before current date')
+            print(msg)
             query.answer(msg)
             return enums.BOT_CHECKOUT_DATE_SELECT
-        # weekday_exists = WorkingHours.select().where(WorkingHours.day == order_date.weekday())
         try:
-            weekday = WorkingHours.get(day=order_datetime.weekday())
+            WorkingHours.get(day=order_datetime.weekday())
         except WorkingHours.DoesNotExist:
-            msg = _('Please select working day')
-            query.answer(msg)
+            msg = _('Please select day according to working days')
+            print(msg)
+            query.answer(msg, show_alert=True)
             return enums.BOT_CHECKOUT_DATE_SELECT
-        now_time = datetime.time(hour=now.hour, minute=now.minute)
-        if now.day == day and now_time > weekday.close_time:
-            msg = _('Shop is already closed today.')
-            query.answer(msg)
-            return enums.BOT_CHECKOUT_DATE_SELECT
+        # try:
+        #     weekday = WorkingHours.get(day=order_datetime.weekday())
+        # except WorkingHours.DoesNotExist:
+        #     msg = _('Please select working day')
+        #     query.answer(msg)
+        #     return enums.BOT_CHECKOUT_DATE_SELECT
+        # now_time = datetime.time(hour=now.hour, minute=now.minute)
+        # if now.day == day and now_time > weekday.close_time:
+        #     msg = _('Shop is already closed today.')
+        #     query.answer(msg)
+        #     return enums.BOT_CHECKOUT_DATE_SELECT
         user_data['order_details']['datetime'] = order_datetime
         state = enums.BOT_CHECKOUT_TIME_SELECT
         msg = _('Please select time')
         msg += '\n\n'
         msg += messages.get_working_hours_msg(_)
-        return shortcuts.initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query.id, msg, cancel=True)
+        working_hours = WorkingHours.get(day=order_datetime.weekday())
+        time_range = (working_hours.open_time, working_hours.close_time)
+        return shortcuts.initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query.id, msg, time_range, cancel=True)
     elif action in ('year', 'month'):
         msg = _('Please select a day')
         query.answer(msg)
         return enums.BOT_CHECKOUT_DATE_SELECT
     elif action == 'back':
-        order_now = shortcuts.check_order_now_allowed()
-        if order_now:
-            return states.enter_order_shipping_time(_, bot, chat_id, action, user_data, order_now, msg_id, query.id)
-        else:
-            delivery_method = user_data['order_details']['delivery']
-            if delivery_method == Order.DELIVERY:
-                return states.enter_order_delivery_address(_, bot, chat_id, query.id)
-            else:
-                return states.enter_order_locations(_, bot, chat_id, action, msg_id, query.id)
+        return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
     elif action == 'cancel':
         msg = _('Order was cancelled')
         bot.edit_message_text(msg, chat_id, msg_id)
@@ -744,23 +785,43 @@ def on_order_time_select(bot, update, user_data):
     if action == 'done':
         hour, minute = user_data['time_picker']['hour'], user_data['time_picker']['minute']
         order_date = user_data['order_details']['datetime']
-        order_datetime = datetime.datetime(year=order_date.year, month=order_date.month, day=order_date.day, hour=hour, minute=minute)
-        working_hours = WorkingHours.get(day=order_datetime.weekday())
-        order_time = datetime.time(hour=hour, minute=minute)
-        # open_time = order_datetime.replace(minute=working_hours.open_time.minute, hour=working_hours.open_time.hour)
-        # close_time = order_datetime.replace(minute=working_hours.close_time.minute, hour=working_hours.close_time.hour)
-        if working_hours.open_time <= order_time <= working_hours.close_time:
-            user_data['order_details']['datetime'] = order_datetime
-            return states.enter_order_phone_number(_, bot, chat_id, query.id)
-        else:
-            msg = _('Please select time according to working hours')
-            msg += '\n\n'
+        try:
+            WorkingHours.get(day=order_date.weekday())
+        except WorkingHours.DoesNotExist:
+            msg = _('Please select working day')
+            msg += '\n'
             msg += messages.get_working_hours_msg(_)
-            state = enums.BOT_CHECKOUT_TIME_SELECT
-            return shortcuts.initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query.id, msg, cancel=True)
+            state = enums.BOT_CHECKOUT_DATE_SELECT
+            return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id, msg, cancel=True)
+        order_datetime = datetime.datetime(year=order_date.year, month=order_date.month, day=order_date.day, hour=hour, minute=minute)
+        now = datetime.datetime.now()
+        if order_datetime.day == now.day and now > order_datetime:
+            msg = _('Time should be later than current')
+            query.answer(msg)
+            return enums.BOT_CHECKOUT_TIME_SELECT
+        user_data['order_details']['datetime'] = order_datetime
+        user = User.get(telegram_id=user_id)
+        now = datetime.datetime.now()
+        id_stages = None
+        if not user.is_registered:
+            id_stages = IdentificationStage.select().where(IdentificationStage.active == True)
+        elif now - datetime.timedelta(hours=24) > user.registration_time:
+            if not Order.select().where(Order.user == User).exists():
+                id_stages = IdentificationStage.select().join(IdentificationPermission) \
+                    .where(IdentificationStage.for_order == True, IdentificationStage.active == True,
+                           IdentificationPermission.permission == user.permission)
+        if id_stages and id_stages.exists():
+            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
+        if BitcoinCredentials.select().first().enabled:
+            return states.enter_order_payment_type(_, bot, chat_id)
+        else:
+            return states.enter_order_confirmation(_, bot, chat_id, user_data, user_id)
     elif action == 'back':
-        delivery_method = user_data['order_details']['delivery']
-        return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, False, msg_id, query.id)
+        msg = _('Pick working day')
+        msg += '\n'
+        msg += messages.get_working_hours_msg(_)
+        state = enums.BOT_CHECKOUT_DATE_SELECT
+        return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id, msg, cancel=True)
     elif action == 'cancel':
         msg = _('Order was cancelled')
         bot.edit_message_text(msg, chat_id, msg_id)
@@ -768,51 +829,6 @@ def on_order_time_select(bot, update, user_data):
         return states.enter_menu(bot, update, user_data)
     else:
         return states.enter_unknown_command(_, bot, query)
-
-
-@user_passes
-def on_order_phone_number(bot, update, user_data):
-    user_id = get_user_id(update)
-    _ = get_trans(user_id)
-    chat_id = update.effective_chat.id
-    answer = update.message.text
-    if answer == _('↩ Back'):
-        order_now = shortcuts.check_order_now_allowed()
-        delivery_method = user_data['order_details']['delivery']
-        return states.enter_order_shipping_time(_, bot, chat_id, delivery_method, user_data, order_now)
-    elif answer == _('❌ Cancel'):
-        msg = _('Order was cancelled')
-        bot.send_message(chat_id, msg)
-        return states.enter_menu(bot, update, user_data)
-    phone = update.message.contact.phone_number
-    print(phone)
-    if not phone:
-        phone = answer.replace(' ', '')
-        match = re.search(r'(\+?\d{10})', answer)
-        if not match:
-            error_msg = _('✒️ Please enter correct phone number')
-            bot.send_message(chat_id, error_msg, reply_markup=keyboards.phone_number_request_keyboard(_))
-            return enums.BOT_CHECKOUT_PHONE_NUMBER
-    user_data['order_details']['phone_number'] = phone
-    msg = _('✅ Phone number set')
-    bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
-    user = User.get(telegram_id=user_id)
-    now = datetime.datetime.now()
-    id_stages = None
-    if now - datetime.timedelta(hours=24) > user.registration_time:
-        if not Order.select().where(Order.user == User).exists():
-            id_stages = IdentificationStage.select().where(IdentificationStage.for_order == True, IdentificationStage.active == True)
-    elif not user.is_registered:
-        id_stages = IdentificationStage.select()
-    if id_stages:
-        if user.is_vip_client:
-            id_stages =  id_stages.select().where(IdentificationStage.vip_required == True)
-        if id_stages.exists():
-            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
-    if BitcoinCredentials.select().first().enabled:
-        return states.enter_order_payment_type(_, bot, chat_id)
-    else:
-        return states.enter_order_confirmation(_, bot, chat_id, user_data, user_id)
 
 
 @user_passes
@@ -828,16 +844,22 @@ def on_order_identification(bot, update, user_data):
             passed_ids = id_data['passed_ids']
             if passed_ids:
                 prev_stage, prev_q = passed_ids.pop()
-                print(prev_stage, prev_q)
                 id_data['current_id'] = prev_stage
                 id_data['current_q_id'] = prev_q
                 question = IdentificationQuestion.get(id=prev_q)
                 msg = question.content
-                bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-                return enums.BOT_CHECKOUT_IDENTIFY
+                prev_stage = IdentificationStage.get(id=prev_stage)
+                if prev_stage.type == 'phone':
+                    reply_markup = keyboards.phone_number_request_keyboard(_)
+                    state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+                else:
+                    reply_markup = keyboards.back_cancel_keyboard(_)
+                    state = enums.BOT_CHECKOUT_IDENTIFY
+                bot.send_message(chat_id, msg, reply_markup=reply_markup)
+                return state
             else:
                 del user_data['order_details']['identification']
-                return states.enter_order_phone_number(_, bot, chat_id, query.id)
+                return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
         elif query.data == 'cancel':
             msg = _('Order was cancelled')
             bot.edit_message_text(msg, chat_id, msg_id)
@@ -861,6 +883,13 @@ def on_order_identification(bot, update, user_data):
             return enums.BOT_CHECKOUT_IDENTIFY
     else:
         answer = update.message.text
+        if answer_type == 'id':
+            answer = answer.replace(' ', '')
+            match = re.search(r'^\d{9}$', answer)
+            if not match:
+                msg = _('Please enter correct ID number (9 numbers)')
+                bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
+                return enums.BOT_CHECKOUT_IDENTIFY
     current_q_id = id_data['current_q_id']
     id_data['answers'].append((current_id, current_q_id, answer))
     passed_ids = id_data['passed_ids']
@@ -868,21 +897,103 @@ def on_order_identification(bot, update, user_data):
     passed_stages_ids = [v[0] for v in passed_ids]
     user = User.get(telegram_id=user_id)
     if not user.is_registered:
-        query = IdentificationStage.id.not_in(passed_stages_ids)
+        stages_left = IdentificationStage.select()\
+            .where(IdentificationStage.id.not_in(passed_stages_ids), IdentificationStage.active == True)
     else:
-        query = (IdentificationStage.for_order == True & IdentificationStage.active == True & IdentificationStage.id.not_in(passed_stages_ids))
-        if user.is_vip_client:
-            query = query & IdentificationStage.vip_required == True
-    stages_left = IdentificationStage.select().where(query)
-    if stages_left:
+        stages_left = IdentificationStage.select().join(IdentificationPermission)\
+            .where(IdentificationStage.id.not_in(passed_stages_ids), IdentificationStage.for_order == True,
+                   IdentificationStage.active == True, IdentificationPermission.permission == user.permission)
+    if stages_left.exists():
         next_stage = stages_left[0]
         questions = next_stage.identification_questions
         question = random.choice(list(questions))
         id_data['current_id'] = next_stage.id
         id_data['current_q_id'] = question.id
         msg = question.content
-        bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
-        return enums.BOT_CHECKOUT_IDENTIFY
+        if next_stage.type == 'phone':
+            reply_markup = keyboards.phone_number_request_keyboard(_)
+            state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+        else:
+            reply_markup = keyboards.back_cancel_keyboard(_)
+            state = enums.BOT_CHECKOUT_IDENTIFY
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+        return state
+    if BitcoinCredentials.select().first().enabled:
+        return states.enter_order_payment_type(_, bot, chat_id)
+    else:
+        return states.enter_order_confirmation(_, bot, chat_id, user_data, user_id)
+
+
+@user_passes
+def on_order_identification_phone_number(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    answer = update.message.text
+    id_data = user_data['order_details']['identification']
+    if answer == _('↩ Back'):
+        passed_ids = id_data['passed_ids']
+        if passed_ids:
+            prev_stage, prev_q = passed_ids.pop()
+            id_data['current_id'] = prev_stage
+            id_data['current_q_id'] = prev_q
+            question = IdentificationQuestion.get(id=prev_q)
+            msg = question.content
+            prev_stage = IdentificationStage.get(id=prev_stage)
+            if prev_stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY
+            bot.send_message(chat_id, msg, reply_markup=reply_markup)
+            return state
+        else:
+            del user_data['order_details']['identification']
+            return states.enter_order_shipping_time(_, bot, chat_id)
+    elif answer == _('❌ Cancel'):
+        msg = _('Order was cancelled')
+        bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
+        return states.enter_menu(bot, update, user_data)
+    answer = update.message.contact.phone_number
+    if not answer:
+        answer = answer.replace(' ', '')
+        match = re.search(r'^(\+?\d{10}$)', answer)
+        if not match:
+            msg = _('✒️ Please enter correct phone number')
+            bot.send_message(chat_id, msg, reply_markup=keyboards.phone_number_request_keyboard(_))
+            return enums.BOT_CHECKOUT_IDENTIFY_PHONE
+    msg = _('✅ Phone number set')
+    bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
+    current_id = id_data['current_id']
+    current_q_id = id_data['current_q_id']
+    id_data['answers'].append((current_id, current_q_id, answer))
+    passed_ids = id_data['passed_ids']
+    passed_ids.append((current_id, current_q_id))
+    passed_stages_ids = [v[0] for v in passed_ids]
+    user = User.get(telegram_id=user_id)
+    if not user.is_registered:
+        stages_left = IdentificationStage.select() \
+            .where(IdentificationStage.id.not_in(passed_stages_ids), IdentificationStage.active == True)
+    else:
+        stages_left = IdentificationStage.select().join(IdentificationPermission) \
+            .where(IdentificationStage.id.not_in(passed_stages_ids), IdentificationStage.for_order == True,
+                   IdentificationStage.active == True, IdentificationPermission.permission == user.permission)
+    if stages_left.exists():
+        next_stage = stages_left[0]
+        questions = next_stage.identification_questions
+        question = random.choice(list(questions))
+        id_data['current_id'] = next_stage.id
+        id_data['current_q_id'] = question.id
+        msg = question.content
+        if next_stage.type == 'phone':
+            reply_markup = keyboards.phone_number_request_keyboard(_)
+            state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+        else:
+            reply_markup = keyboards.back_cancel_keyboard(_)
+            state = enums.BOT_CHECKOUT_IDENTIFY
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+        return state
     if BitcoinCredentials.select().first().enabled:
         return states.enter_order_payment_type(_, bot, chat_id)
     else:
@@ -910,10 +1021,17 @@ def on_order_payment_type(bot, update, user_data):
             last_q_id = id_data['current_q_id']
             last_question = IdentificationQuestion.get(id=last_q_id)
             msg = last_question.content
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-            return enums.BOT_CHECKOUT_IDENTIFY
+            stage = IdentificationStage.get(id=id_data['current_id'])
+            if stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return state
         else:
-            return states.enter_order_phone_number(_, bot, chat_id, query.id)
+            return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
     elif action == 'cancel':
         msg = _('Order was cancelled')
         bot.edit_message_text(msg, chat_id, msg_id)
@@ -939,14 +1057,15 @@ def on_order_confirm(bot, update, user_data):
             if loc_id:
                 location = Location.get(id=loc_id)
         shipping_time = order_data['datetime']
-        order_address = order_data.get('address', '')
-        phone_number = order_data.get('phone_number')
-        coordinates = order_data.get('geo_location')
-        if coordinates:
-            coordinates = '|'.join(map(str, coordinates.values()))
+        if shipping_time == 'now':
+            shipping_time = _('⏰ Closest time')
+        else:
+            shipping_time = shipping_time.strftime('%d %b, %H:%M')
+        order_address = order_data.get('address')
+        # phone_number = order_data.get('phone_number')
         user = User.get(telegram_id=user_id)
         order = Order.create(user=user, location=location, shipping_method=delivery_method, shipping_time=shipping_time,
-                             address=order_address, phone_number=phone_number, coordinates=coordinates)
+                             address=order_address)
         btc_payment = order_data.get('btc_payment')
         if btc_payment:
             btc_value = order_data['btc_value']
@@ -968,25 +1087,23 @@ def on_order_confirm(bot, update, user_data):
                           order_id,
                           update.effective_user.id,
                           update.effective_user.username)
-        order_identification = user_data.get('order_identification')
-        if order_identification:
-            for stage_id, q_id, answer in order_identification['answers']:
-                stage = IdentificationStage.get(id=stage_id)
-                question = IdentificationQuestion.get(id=q_id)
-                OrderIdentificationAnswer.create(stage=stage, question=question, order=order, content=answer)
 
         # ORDER CONFIRMED, send the details to service channel
         # user_name = escape_markdown(order.user.username)
-        if location:
-            location_title = escape_markdown(location.title)
-        else:
-            location_title = '-'
-        text = _('Order №{}, Location {}\nUser @{}').format(order_id, location_title, user.username)
+        location_title = location.title if location else '-'
+        text = _('Order №{}, Location: {}\nUser @{}').format(order_id, location_title, user.username)
         service_channel = get_service_channel()
-        total = Cart.fill_order(user_data, order, user.currency)
+        coordinates = order_data.get('geo_location')
+        shortcuts.send_order_identification_answers(bot, service_channel, order, channel=True)
+        if coordinates:
+            lat, long = coordinates['lat'], coordinates['long']
+            order.coordinates = lat + '|' + long + '|'
+        total = Cart.fill_order(user_data, order, user)
         delivery_fee = shortcuts.calculate_delivery_fee(delivery_method, location, total, user.is_vip_client)
+        discount = calculate_discount(total)
         order.delivery_fee = delivery_fee
         order.total_cost = total
+        order.discount = discount
         order.save()
         # text = messages.create_service_notice(_, order, btc_data)
         reply_markup = keyboards.show_order_keyboard(_, order_id)
@@ -1019,13 +1136,21 @@ def on_order_confirm(bot, update, user_data):
             return states.enter_order_payment_type(_, bot, chat_id, msg_id, query.id)
         id_data = user_data['order_details'].get('identification')
         if id_data:
+            id_data['passed_ids'].pop()
             last_q_id = id_data['current_q_id']
             last_question = IdentificationQuestion.get(id=last_q_id)
             msg = last_question.content
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-            return enums.BOT_CHECKOUT_IDENTIFY
+            stage = IdentificationStage.get(id=id_data['current_id'])
+            if stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return state
         else:
-            return states.enter_order_phone_number(_, bot, chat_id, query.id)
+            return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
     else:
         return states.enter_unknown_command(_, bot, query)
 
@@ -1045,13 +1170,21 @@ def on_order_btc_conversion_failed(bot, update, user_data):
     elif action == 'back':
         id_data = user_data['order_details'].get('identification')
         if id_data:
+            id_data['passed_ids'].pop()
             last_q_id = id_data['current_q_id']
             last_question = IdentificationQuestion.get(id=last_q_id)
             msg = last_question.content
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-            return enums.BOT_CHECKOUT_IDENTIFY
+            stage = IdentificationStage.get(id=id_data['current_id'])
+            if stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return state
         else:
-            return states.enter_order_phone_number(_, bot, chat_id, query.id)
+            return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
     elif action == '🔄try_again':
         return states.enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id, query.id)
     else:
@@ -1073,13 +1206,21 @@ def on_order_generating_address_failed(bot, update, user_data):
     elif action == 'back':
         id_data = user_data['order_details'].get('identification')
         if id_data:
+            id_data['passed_ids'].pop()
             last_q_id = id_data['current_q_id']
             last_question = IdentificationQuestion.get(id=last_q_id)
             msg = last_question.content
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-            return enums.BOT_CHECKOUT_IDENTIFY
+            stage = IdentificationStage.get(id=id_data['current_id'])
+            if stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return state
         else:
-            return states.enter_order_phone_number(_, bot, chat_id, query.id)
+            return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
     elif action == '🔄try_again':
         return states.enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id, query.id)
     else:
@@ -1101,13 +1242,21 @@ def on_order_btc_too_low(bot, update, user_data):
     elif action == 'back':
         id_data = user_data['order_details'].get('identification')
         if id_data:
+            id_data['passed_ids'].pop()
             last_q_id = id_data['current_q_id']
             last_question = IdentificationQuestion.get(id=last_q_id)
             msg = last_question.content
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-            return enums.BOT_CHECKOUT_IDENTIFY
+            stage = IdentificationStage.get(id=id_data['current_id'])
+            if stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_CHECKOUT_IDENTIFY
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return state
         else:
-            return states.enter_order_phone_number(_, bot, chat_id, query.id)
+            return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id)
     elif action == '🔄try_again':
         return states.enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id, query.id)
     else:
@@ -1145,17 +1294,21 @@ def on_registration(bot, update, user_data):
             bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
             return enums.BOT_IDENTIFICATION
         else:
-            msg = _('Please send your phone number.')
-            bot.send_message(chat_id, msg, reply_markup=keyboards.phone_number_request_keyboard(_))
-            query.answer()
-            return enums.BOT_PHONE_NUMBER
-    elif action == 'cancel':
+            msg = _('Registration is not allowed now')
+            bot.edit_message_text(msg, chat_id, msg_id)
+            if not config.only_for_registered:
+                return states.enter_menu(bot, update, user_data)
+        # else:
+        #     msg = _('Please send your phone number.')
+        #     bot.send_message(chat_id, msg, reply_markup=keyboards.phone_number_request_keyboard(_))
+        #     query.answer()
+        #     return enums.BOT_PHONE_NUMBER
+    else:
         if config.only_for_registered:
             bot.delete_message(chat_id, msg_id)
             return ConversationHandler.END
         else:
             return states.enter_menu(bot, update, user_data, msg_id)
-    return states.enter_unknown_command(_, bot, query)
 
 
 @user_passes
@@ -1180,13 +1333,19 @@ def on_registration_repeat(bot, update, user_data):
             msg = _('Please complete identification process.')
             msg += '\n\n'
             msg += escape_markdown(question.content)
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-            return enums.BOT_IDENTIFICATION
+            if first_stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_IDENTIFICATION_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_IDENTIFICATION
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            return state
         else:
-            msg = _('Please send your phone number.')
-            bot.send_message(chat_id, msg, reply_markup=keyboards.phone_number_request_keyboard(_))
-            query.answer()
-            return enums.BOT_PHONE_NUMBER
+            msg = _('Registration is not allowed now')
+            bot.edit_message_text(msg, chat_id, msg_id)
+            if not config.only_for_registered:
+                return states.enter_menu(bot, update, user_data)
     elif action == 'no':
         if config.only_for_registered:
             return states.enter_registration(_, bot, chat_id, msg_id, query.id)
@@ -1212,8 +1371,15 @@ def on_registration_identification(bot, update, user_data):
                 id_data['current_q_id'] = prev_q
                 question = IdentificationQuestion.get(id=prev_q)
                 msg = question.content
-                bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
-                return enums.BOT_IDENTIFICATION
+                prev_stage = IdentificationStage.get(id=prev_stage)
+                if prev_stage.type == 'phone':
+                    reply_markup = keyboards.phone_number_request_keyboard(_)
+                    state = enums.BOT_IDENTIFICATION_PHONE
+                else:
+                    reply_markup = keyboards.back_cancel_keyboard(_)
+                    state = enums.BOT_IDENTIFICATION
+                bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+                return state
             else:
                 del user_data['user_registration']
                 return states.enter_registration(_, bot, chat_id, msg_id)
@@ -1228,7 +1394,6 @@ def on_registration_identification(bot, update, user_data):
     current_id = id_data['current_id']
     current_stage = IdentificationStage.get(id=current_id)
     answer_type = current_stage.type
-    print(answer_type)
     if answer_type in ('photo', 'video'):
         try:
             answer = getattr(update.message, answer_type)
@@ -1239,7 +1404,6 @@ def on_registration_identification(bot, update, user_data):
             answer = None
     else:
         answer = update.message.text
-    print(answer)
     # trans here
     if not answer:
         text = _(answer_type)
@@ -1260,64 +1424,110 @@ def on_registration_identification(bot, update, user_data):
         id_data['current_id'] = next_stage.id
         id_data['current_q_id'] = question.id
         msg = question.content
-        bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
-        return enums.BOT_IDENTIFICATION
+        if next_stage.type == 'phone':
+            reply_markup = keyboards.phone_number_request_keyboard(_)
+            state = enums.BOT_IDENTIFICATION_PHONE
+        else:
+            reply_markup = keyboards.back_cancel_keyboard(_)
+            state = enums.BOT_IDENTIFICATION
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+        return state
     else:
-        msg = _('Please send your phone number.')
-        bot.send_message(chat_id, msg, reply_markup=keyboards.phone_number_request_keyboard(_))
-        return enums.BOT_PHONE_NUMBER
+        user = User.get(telegram_id=user_id)
+        for stage_id, q_id, answer in id_data['answers']:
+            stage = IdentificationStage.get(id=stage_id)
+            question = IdentificationQuestion.get(id=q_id)
+            UserIdentificationAnswer.create(stage=stage, question=question, user=user, content=answer)
+        del user_data['user_registration']
+        # user.phone_number = phone_number_text
+        user.permission = UserPermission.PENDING_REGISTRATION
+        user.save()
+        msg = _('Thank you for registration! Your application will be reviewed by admin.')
+        bot.send_message(chat_id, msg)
+        if not config.only_for_registered:
+            return states.enter_menu(bot, update, user_data)
+        else:
+            return states.enter_registration(_, bot, chat_id)
 
 
 @user_passes
-def on_registration_phone_number(bot, update, user_data):
+def on_registration_identification_phone(bot, update, user_data):
     answer = update.message.text
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id = update.effective_chat.id
-    reg_data = user_data.get('user_registration')
+    id_data = user_data['user_registration']['identification']
     if answer == _('↩ Back'):
-        if reg_data:
-            id_data = reg_data['identification']
+        if id_data:
             prev_stage, prev_q = id_data['passed_ids'].pop()
             id_data['current_id'] = prev_stage
             id_data['current_q_id'] = prev_q
             question = IdentificationQuestion.get(id=prev_q)
             msg = question.content
-            bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
-            return enums.BOT_IDENTIFICATION
+            prev_stage = IdentificationStage.get(id=prev_stage)
+            if prev_stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_IDENTIFICATION_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_IDENTIFICATION
+            bot.send_message(chat_id, msg, reply_markup=reply_markup)
+            return state
         else:
-            if reg_data:
+            if id_data:
                 del user_data['user_registration']
             return states.enter_registration(_, bot, chat_id)
     elif answer == _('❌ Cancel'):
-        if reg_data:
+        if id_data:
             del user_data['user_registration']
         if config.only_for_registered:
             return states.enter_registration(_, bot, chat_id)
         else:
             return states.enter_menu(bot, update, user_data)
-    elif answer == _('✒️Enter phone manually'):
-        return enums.BOT_PHONE_NUMBER
     else:
         try:
-            phone_number_text = update.message.contact.phone_number
+            answer = update.message.contact.phone_number
         except AttributeError:
-            phone_number_text = update.message.text
-            phone_number_text = phone_number_text.replace(' ', '')
-            match = re.search(r'(\+?\d{10})', phone_number_text)
+            answer = update.message.text
+            answer = answer.replace(' ', '')
+            match = re.search(r'^(\+?\d{10}$)', answer)
             if not match:
                 error_msg = _('✒️ Please enter correct phone number')
                 bot.send_message(chat_id, error_msg)
-                return enums.BOT_PHONE_NUMBER
+                return enums.BOT_IDENTIFICATION_PHONE
+        current_q_id = id_data['current_q_id']
+        current_id = id_data['current_id']
+        id_data['answers'].append((current_id, current_q_id, answer))
+        passed_ids = id_data['passed_ids']
+        passed_ids.append((current_id, current_q_id))
+        passed_stages_ids = [v[0] for v in passed_ids]
+        stages_left = IdentificationStage.select().where(
+            IdentificationStage.active == True & IdentificationStage.id.not_in(passed_stages_ids))
+        msg = _('✅ Phone number set')
+        bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
+        if stages_left:
+            next_stage = stages_left[0]
+            questions = next_stage.identification_questions
+            question = random.choice(list(questions))
+            id_data['current_id'] = next_stage.id
+            id_data['current_q_id'] = question.id
+            msg = question.content
+            if next_stage.type == 'phone':
+                reply_markup = keyboards.phone_number_request_keyboard(_)
+                state = enums.BOT_IDENTIFICATION_PHONE
+            else:
+                reply_markup = keyboards.back_cancel_keyboard(_)
+                state = enums.BOT_IDENTIFICATION
+            bot.send_message(chat_id, msg, reply_markup=reply_markup)
+            return state
         user = User.get(telegram_id=user_id)
-        if reg_data:
-            id_data = reg_data['identification']
+        if id_data:
             for stage_id, q_id, answer in id_data['answers']:
                 stage = IdentificationStage.get(id=stage_id)
                 question = IdentificationQuestion.get(id=q_id)
                 UserIdentificationAnswer.create(stage=stage, question=question, user=user, content=answer)
             del user_data['user_registration']
-        user.phone_number = phone_number_text
+        # user.phone_number = phone_number_text
         user.permission = UserPermission.PENDING_REGISTRATION
         user.save()
         msg = _('Thank you for registration! Your application will be reviewed by admin.')
@@ -1326,6 +1536,66 @@ def on_registration_phone_number(bot, update, user_data):
             return states.enter_menu(bot, update, user_data)
         else:
             return states.enter_registration(_, bot, chat_id)
+
+
+# @user_passes
+# def on_registration_phone_number(bot, update, user_data):
+#     answer = update.message.text
+#     user_id = get_user_id(update)
+#     _ = get_trans(user_id)
+#     chat_id = update.effective_chat.id
+#     reg_data = user_data.get('user_registration')
+#     if answer == _('↩ Back'):
+#         if reg_data:
+#             id_data = reg_data['identification']
+#             prev_stage, prev_q = id_data['passed_ids'].pop()
+#             id_data['current_id'] = prev_stage
+#             id_data['current_q_id'] = prev_q
+#             question = IdentificationQuestion.get(id=prev_q)
+#             msg = question.content
+#             bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
+#             return enums.BOT_IDENTIFICATION
+#         else:
+#             if reg_data:
+#                 del user_data['user_registration']
+#             return states.enter_registration(_, bot, chat_id)
+#     elif answer == _('❌ Cancel'):
+#         if reg_data:
+#             del user_data['user_registration']
+#         if config.only_for_registered:
+#             return states.enter_registration(_, bot, chat_id)
+#         else:
+#             return states.enter_menu(bot, update, user_data)
+#     elif answer == _('✒️Enter phone manually'):
+#         return enums.BOT_PHONE_NUMBER
+#     else:
+#         try:
+#             phone_number_text = update.message.contact.phone_number
+#         except AttributeError:
+#             phone_number_text = update.message.text
+#             phone_number_text = phone_number_text.replace(' ', '')
+#             match = re.search(r'(\+?\d{10})', phone_number_text)
+#             if not match:
+#                 error_msg = _('✒️ Please enter correct phone number')
+#                 bot.send_message(chat_id, error_msg)
+#                 return enums.BOT_PHONE_NUMBER
+#         user = User.get(telegram_id=user_id)
+#         if reg_data:
+#             id_data = reg_data['identification']
+#             for stage_id, q_id, answer in id_data['answers']:
+#                 stage = IdentificationStage.get(id=stage_id)
+#                 question = IdentificationQuestion.get(id=q_id)
+#                 UserIdentificationAnswer.create(stage=stage, question=question, user=user, content=answer)
+#             del user_data['user_registration']
+#         user.phone_number = phone_number_text
+#         user.permission = UserPermission.PENDING_REGISTRATION
+#         user.save()
+#         msg = _('Thank you for registration! Your application will be reviewed by admin.')
+#         bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
+#         if not config.only_for_registered:
+#             return states.enter_menu(bot, update, user_data)
+#         else:
+#             return states.enter_registration(_, bot, chat_id)
 
 
 @user_passes
@@ -1420,11 +1690,11 @@ def on_my_order_date(bot, update, user_data):
                     query.answer(_('Second date could not be before first date'), show_alert=True)
                     return enums.BOT_MY_ORDERS_DATE
                 del user_data['calendar']
-                date_query = shortcuts.get_order_subquery(first_date=first_date, second_date=second_date)
+                date_query = shortcuts.get_date_subquery(Order, first_date=first_date, second_date=second_date)
         elif action == 'year':
-            date_query = shortcuts.get_order_subquery(year=year)
+            date_query = shortcuts.get_date_subquery(Order, year=year)
         else:
-            date_query = shortcuts.get_order_subquery(month=month, year=year)
+            date_query = shortcuts.get_date_subquery(Order, month=month, year=year)
         user = User.get(telegram_id=user_id)
         orders = Order.select().where(Order.user == user, *date_query)
         if len(orders) == 1:
@@ -1704,10 +1974,6 @@ def on_service_order_message(bot, update, user_data):
         order.save()
     elif action == 'order_hide':
         _ = get_channel_trans()
-        if order.location:
-            location = order.location.title
-        else:
-            location = '-'
         for answer in order.identification_answers:
             answer_msg_id = answer.msg_id
             if answer_msg_id:
@@ -1715,9 +1981,10 @@ def on_service_order_message(bot, update, user_data):
         if order.coordinates:
             msg_id = order.coordinates.split('|')[-1]
             shortcuts.delete_channel_msg(bot, chat_id, msg_id)
+        location = order.location.title if order.location else '-'
         msg = _('Order №{}, Location {}\nUser @{}').format(order_id, location, order.user.username)
         reply_markup = keyboards.show_order_keyboard(_, order.id)
-        msg_id = shortcuts.edit_channel_msg(bot, msg, chat_id, msg_id, reply_markup, order)
+        msg_id = shortcuts.edit_channel_msg(bot, msg, chat_id, msg_id, reply_markup, order, parse_mode=None)
         order.order_text_msg_id = msg_id
         order.save()
     elif action == 'order_send_to_specific_courier':
@@ -1832,14 +2099,50 @@ def on_service_order_message(bot, update, user_data):
             msg = _('*{}* has been added to black-list!').format(username)
             shortcuts.send_channel_msg(bot, msg, chat_id, order=order)
             query.answer()
-    # elif action == 'order_add_to_vip':
-    #     _ = get_channel_trans()
-    #     if order.user.is_vip_client:
-    #         query.answer(text=_('Client is already VIP'), show_alert=True)
-    #     else:
-    #
-    #         query.answer(text=_('You should no manually add this user to VIP, '
-    #                             'while we working on API to do it via bot'), show_alert=True)
+    elif action == 'order_chat_log':
+        _ = get_channel_trans()
+        try:
+            chat = CourierChat.get(user = order.user, order = order, courier = order.courier)
+        except CourierChat.DoesNotExist:
+            msg = _('Courier and client didn\'t chat yet')
+            query.answer(msg, show_alert=True)
+        else:
+            chat_messages = CourierChatMessage.select().where(CourierChatMessage.chat == chat)\
+                .order_by(CourierChatMessage.date_created.asc())
+            if chat_messages.exists():
+                for answer in order.identification_answers:
+                    answer_msg_id = answer.msg_id
+                    if answer_msg_id:
+                        shortcuts.delete_channel_msg(bot, chat_id, msg_id)
+                if order.coordinates:
+                    msg_id = order.coordinates.split('|')[-1]
+                    shortcuts.delete_channel_msg(bot, chat_id, msg_id)
+
+                msg = _('Order №{} chat log:').format(order.id)
+                shortcuts.edit_channel_msg(bot, msg, chat_id, msg_id, order=order, parse_mode=None)
+                for chat_msg in chat_messages:
+                    time_sent = chat_msg.date_created.strftime('%d %b, %H:%M')
+                    msg = _('{}\nFrom @{}:').format(time_sent, chat_msg.author.username)
+                    msg_data = chat_msg.message
+                    msg_type = chat_msg.msg_type
+                    if msg_type == 'photo':
+                        shortcuts.send_channel_photo(bot, msg_data, chat_id, caption=msg, order=order)
+                    elif msg_type == 'video':
+                        shortcuts.send_channel_video(bot, msg_data, chat_id, caption=msg, order=order)
+                    else:
+                        msg += '\n'
+                        msg += msg_data
+                        shortcuts.send_channel_msg(bot, msg, chat_id, order=order, parse_mode=None)
+
+                location = order.location.title if order.location else '-'
+                msg = _('Order №{}, Location {}\nUser @{}').format(order_id, location, order.user.username)
+                reply_markup = keyboards.show_order_keyboard(_, order.id)
+                msg_id = shortcuts.send_channel_msg(bot, msg, chat_id, reply_markup, order, parse_mode=None)
+                order.order_text_msg_id = msg_id
+                order.save()
+            else:
+                msg = _('There are no messages yet.')
+                query.answer(msg, show_alert=True)
     else:
         logger.info('That part is not handled yet: {}'.format(action))
 
@@ -1886,7 +2189,8 @@ def on_service_order_finished_message(bot, update, user_data):
         except OrderBtcPayment.DoesNotExist:
             btc_data = None
         msg = messages.create_service_notice(_, order, btc_data)
-        keyboard = keyboards.order_finished_keyboard(_, order_id, False)
+        lottery_available = shortcuts.check_lottery_available(order)
+        keyboard = keyboards.order_finished_keyboard(_, order_id, False, lottery_available)
         msg_id = shortcuts.send_channel_msg(bot, msg, chat_id, keyboard, order)
         order.order_text_msg_id = msg_id
         order.save()
@@ -1896,11 +2200,151 @@ def on_service_order_finished_message(bot, update, user_data):
         msg = _('Order №{} was delivered by {} @{}\n').format(order.id, status, courier.username)
         msg += _('Client: @{}').format(order.user.username)
         keyboard = keyboards.order_finished_keyboard(_, order_id)
-        msg_id = shortcuts.send_channel_msg(bot, msg, chat_id, keyboard, order, parse_mode=None)
+        msg_id = shortcuts.edit_channel_msg(bot, msg, chat_id, msg_id, keyboard, order, parse_mode=None)
+        # msg_id = shortcuts.send_channel_msg(bot, msg, chat_id, keyboard, order, parse_mode=None)
         order.order_text_msg_id = msg_id
         order.save()
     elif action == 'finished_order_lottery':
-        pass
+        # try:
+        #     lottery = Lottery.get(completed_date=None, active=True)
+        # except Lottery.DoesNotExist:
+        #     msg = _('There\'s no active lotteries right now')
+        #     query.answer(msg, show_alert=True)
+        # else:
+        #     participant_exists = LotteryParticipant.select()\
+        #         .where(LotteryParticipant.participant == order.user, LotteryParticipant == lottery).exists()
+        #     if participant_exists:
+        #         msg = _('User is already in the lottery')
+        if shortcuts.check_lottery_available(order):
+            lottery = Lottery.get(completed_date=None, active=True)
+            tickets_used = LotteryParticipant.select()\
+                .where(LotteryParticipant.lottery == lottery, LotteryParticipant.is_pending == False).count()
+            if lottery.num_tickets > tickets_used:
+                is_pending = False
+                msg = _('User has been added to lottery')
+            else:
+                is_pending = True
+                msg = _('There are no tickets left')
+                msg += '\n'
+                msg += _('User has been added to lottery queue')
+            all_codes = LotteryParticipant.filter(is_pending=False, lottery=lottery)
+            all_codes = [item.code for item in all_codes]
+            shortcuts.add_client_to_lottery(lottery, order.user, all_codes, is_pending)
+        else:
+            msg = _('Lottery is not available for this user')
+        query.answer(msg, show_alert=True)
+
+
+@user_passes
+def on_client_order_delivered(bot, update, user_data):
+    query = update.callback_query
+    action, order_id = query.data.split('|')
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    order = Order.get(id=order_id)
+    if action == 'delivered_order_lottery':
+        lottery_available = shortcuts.check_lottery_available(order)
+        if not lottery_available:
+            msg = _('Lottery is not available anymore')
+        else:
+            lottery = Lottery.get(completed_date=None, active=True)
+            tickets_used = LotteryParticipant.select() \
+                .where(LotteryParticipant.lottery == lottery, LotteryParticipant.is_pending == False).count()
+            if lottery.num_tickets > tickets_used:
+                is_pending = False
+                msg = _('You have been added to lottery')
+            else:
+                is_pending = True
+                msg = _('There are no tickets left')
+                msg += '\n'
+                msg += _('User have been added to lottery queue')
+            all_codes = LotteryParticipant.filter(is_pending=False, lottery=lottery)
+            all_codes = [item.code for item in all_codes]
+            shortcuts.add_client_to_lottery(lottery, order.user, all_codes, is_pending)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.client_order_finished_keyboard(_, order_id, lottery_available))
+        query.answer()
+        return enums.BOT_ORDER_DELIVERED
+    elif action == 'delivered_order_review':
+        user_data['review_order'] = {'order_id': order_id, 'answers': {}}
+        msg = _('Please send a review')
+        reply_markup = keyboards.client_order_review_keyboard(_, {})
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.BOT_ORDER_REVIEW
+
+
+@user_passes
+def on_order_review(bot, update, user_data):
+    query = update.callback_query
+    action = query.data
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    if action.startswith('review_question'):
+        q_id, rank = (int(val) for val in action.split('_')[-2:])
+        answers = user_data['review_order']['answers']
+        if rank != answers.get(q_id):
+            answers[q_id] = rank
+            msg = _('Please send a review')
+            reply_markup = keyboards.client_order_review_keyboard(_, answers)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.BOT_ORDER_REVIEW
+    elif action == 'review_words':
+        msg = _('Please add a few words:')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_))
+        query.answer()
+        return enums.BOT_ORDER_REVIEW_FEW_WORDS
+    elif action == 'review_send':
+        review_data = user_data['review_order']
+        order_id = review_data['order_id']
+        order = Order.get(id=order_id)
+        text = review_data.get('text')
+        user = User.get(telegram_id=user_id)
+        review = Review.create(user=user, order=order, text=text)
+        answers = review_data['answers']
+        for q_id, rank in answers.items():
+            question = ReviewQuestion.get(id=q_id)
+            ReviewQuestionRank.create(question=question, review=review, rank=rank)
+        msg = _('Thank you. Review is sent!')
+        bot.edit_message_text(msg, chat_id, msg_id)
+        return states.enter_menu(bot, update, user_data, query_id=query.id)
+    elif action == 'review_back':
+        order_id = user_data['review_order']['order_id']
+        order = Order.get(id=order_id)
+        lottery_available = shortcuts.check_lottery_available(order)
+        msg = _('Order №{} is completed.').format(order.id)
+        msg += '\n'
+        msg += _('We would love to hear about your experience with our products and service')
+        reply_markup = keyboards.client_order_finished_keyboard(_, order_id, lottery_available)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.BOT_ORDER_DELIVERED
+    else:
+        query.answer()
+        return enums.BOT_ORDER_REVIEW
+
+
+@user_passes
+def on_order_review_few_words(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    reply_markup = keyboards.client_order_review_keyboard(_, user_data['review_order']['answers'])
+    if query and query.data == 'back':
+        msg = _('Please send a review')
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup)
+        query.answer()
+    else:
+        text = update.message.text
+        user_data['review_order']['text'] = text
+        msg = _('Review message is saved.')
+        msg += '\n'
+        msg += _('Please send a review')
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    return enums.BOT_ORDER_REVIEW
 
 
 def delete_message(bot, update):
@@ -1908,10 +2352,6 @@ def delete_message(bot, update):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     shortcuts.delete_channel_msg(bot, chat_id, msg_id)
     query.answer()
-#
-#
-# def on_cancel(bot, update, user_data):
-#     return enter_state_init_order_cancelled(bot, update, user_data)
 
 
 def service_channel_courier_query_handler(bot, update, user_data):
@@ -2102,10 +2542,10 @@ def on_product_categories(bot, update, user_data):
         cat_msg = bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN)
         products_msgs = [cat_msg['message_id']]
         # send_products to current chat
+        user = User.get(telegram_id=user_id)
         products = shortcuts.get_users_products(user, cat)
         if products.exists():
-            user = User.get(telegram_id=user_id)
-            msgs_ids = shortcuts.send_products(_, bot, user_data, chat_id, products, user.currency)
+            msgs_ids = shortcuts.send_products(_, bot, user_data, chat_id, products, user)
             products_msgs += msgs_ids
         user_data['products_msgs'] = products_msgs
         user_data['category_id'] = cat.id
@@ -2113,7 +2553,6 @@ def on_product_categories(bot, update, user_data):
     elif action == 'back':
         return states.enter_menu(bot, update, user_data, msg_id, query.id)
     return states.enter_unknown_command(_, bot, query)
-
 
 @user_passes
 def on_calendar_change(bot, update, user_data):
@@ -2182,35 +2621,31 @@ def on_time_picker_change(bot, update, user_data):
         return states.enter_menu(bot, update, user_data)
     else:
         action = query.data
-        time_picker_actions = [
-            'time_picker_hour_prev', 'time_picker_hour_next', 'time_picker_minute_prev',
-            'time_picker_minute_next', 'time_picker_ignore'
-        ]
-        if action in time_picker_actions:
-            if action == 'time_picker_hour_prev':
-                if hour == 0:
-                    hour = 23
-                else:
-                    hour -= 1
-            elif action == 'time_picker_hour_next':
-                hour += 1
-                if hour == 24:
-                    hour = 0
-            elif action == 'time_picker_minute_prev':
-                minute -= 1
-                minute = minute % 60
-            elif action == 'time_picker_minute_next':
-                minute += 1
-                minute = minute % 60
+        start_time, end_time = time_data['range']
+        picked_time = datetime.datetime.today().replace(hour=hour, minute=minute)
+        if action.startswith('time_picker_hour'):
+            delta = datetime.timedelta(hours=1)
+            if action == 'time_picker_hour_next':
+                picked_time += delta
             else:
-                query.answer()
-                return state
+                picked_time -= delta
+        elif action.startswith('time_picker_minute'):
+            delta = datetime.timedelta(minutes=30)
+            if action == 'time_picker_minute_next':
+                picked_time += delta
+            else:
+                picked_time -= delta
+        else:
+            query.answer()
+            return state
+        picked_time = datetime.time(hour=picked_time.hour, minute=picked_time.minute)
+        if start_time <= picked_time <= end_time:
+            hour, minute = picked_time.hour, picked_time.minute
             user_data['time_picker']['hour'] = hour
             user_data['time_picker']['minute'] = minute
             msg = time_data['msg']
             reply_markup = keyboards.time_picker_keyboard(_, hour, minute, time_data['cancel'])
-            bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-            query.answer()
-            return state
-        else:
-            return states.enter_unknown_command(_, bot, query)
+            bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup,
+                              parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return state

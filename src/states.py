@@ -10,7 +10,8 @@ from peewee import JOIN
 from . import keyboards, messages, enums, shortcuts
 from .cart_helper import Cart
 from .models import Location, User, OrderBtcPayment, Channel, IdentificationStage, UserPermission, CourierLocation, \
-    Product, WorkingHours, GroupProductCount, ProductCount, GroupProductCountPermission, Order
+    Product, WorkingHours, GroupProductCount, ProductCount, GroupProductCountPermission, Order, UserGroupCount, ProductGroupCount, \
+    LotteryParticipant, LotteryPermission
 from .helpers import config, get_user_id, get_trans, is_vip_customer, is_admin, get_username, \
     get_user_update_username, logger, get_currency_symbol
 from .btc_settings import BtcSettings
@@ -34,7 +35,7 @@ def enter_menu(bot, update, user_data, msg_id=None, query_id=None):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     user = User.get(telegram_id=user_id)
-    products_info = Cart.get_products_info(user_data, user.currency)
+    products_info = Cart.get_products_info(user_data, user)
     if products_info:
         msg = messages.create_cart_details_msg(user_id, products_info)
     else:
@@ -140,7 +141,7 @@ def enter_settings_registered_users_perms(_, bot, chat_id, msg_id, query_id, msg
     # users = User.select(User.username, User.id).join(UserPermission) \
     #     .where(UserPermission.permission.not_in(registered_perms), User.banned == False).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, statuses)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_REGISTERED_USERS_PERMS
 
@@ -149,10 +150,8 @@ def enter_settings_registered_users(_, bot, chat_id, perm, msg_id, query_id, pag
     if not msg:
         msg = _('👩 Registered users')
     users = User.select(User.username, User.id).where(User.permission == perm, User.banned == False).tuples()
-    # users = User.select(User.username, User.id).join(UserPermission) \
-    #     .where(UserPermission.permission.not_in(registered_perms), User.banned == False).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, users, page_num=page)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_REGISTERED_USERS
 
@@ -160,9 +159,9 @@ def enter_settings_registered_users(_, bot, chat_id, perm, msg_id, query_id, pag
 def enter_registered_users_select(_, bot, chat_id, msg, query_id, msg_id=None):
     reply_markup = keyboards.registered_user_keyboard(_)
     if msg_id:
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     else:
-        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_REGISTERED_USERS_SELECT
 
@@ -183,9 +182,9 @@ def enter_pending_registrations_user(_, bot, chat_id, msg_id, query_id, user_dat
     bot.delete_message(chat_id, msg_id)
     answers_ids = shortcuts.send_user_identification_answers(bot, chat_id, user)
     user_data['user_id_messages'] = answers_ids
-    msg = _('*Phone number*: {}').format(user.phone_number)
+    msg = _('User @{}').format(user.username)
     reply_markup = keyboards.pending_user_keyboard(_)
-    bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    bot.send_message(chat_id, msg, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_PENDING_REGISTRATIONS_USER
 
@@ -196,7 +195,7 @@ def enter_black_list(_, bot, chat_id, msg_id, query_id, page=1, msg=None):
     users = User.select(User.username, User.id).join(UserPermission)\
         .where(User.banned == True, UserPermission.permission != UserPermission.OWNER).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, users, page_num=page)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_BLACK_LIST
 
@@ -204,13 +203,12 @@ def enter_black_list(_, bot, chat_id, msg_id, query_id, page=1, msg=None):
 def enter_courier_detail(_, bot, chat_id, msg_id, query_id, courier_id):
     courier = User.get(id=courier_id)
     locations = CourierLocation.filter(user=courier)
-    username = escape_markdown(courier.username)
     if locations:
         locations = [item.location.title for item in locations]
-        locations_msg = escape_markdown(', '.join(locations))
+        locations_msg = ', '.join(locations)
     else:
-        locations_msg = _('_Courier don\'t have any locations yet_')
-    msg = _('Username: *{}*').format(username)
+        locations_msg = _('Courier don\'t have any locations yet')
+    msg = _('Username: @{}').format(courier.username)
     msg += '\n'
     msg += _('Telegram ID: {}').format(courier.telegram_id)
     msg += '\n'
@@ -218,7 +216,7 @@ def enter_courier_detail(_, bot, chat_id, msg_id, query_id, courier_id):
     msg += '\n'
     msg += locations_msg
     reply_markup = keyboards.courier_details_keyboard(_)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_COURIER_DETAIL
 
@@ -445,21 +443,19 @@ def enter_order_delivery_address(_, bot, chat_id, query_id=None):
     return enums.BOT_CHECKOUT_ADDRESS
 
 
-def enter_order_shipping_time(_, bot, chat_id, action, user_data, order_now, msg_id=None, query_id=None):
-    if action == Order.PICKUP:
-        msg = _('Please select day when you want to pickup order')
-    else:
-        msg = _('Please select delivery day')
-    if not order_now:
-        msg += '\n'
-        msg += messages.get_working_hours_msg(_)
-        state = enums.BOT_CHECKOUT_DATE_SELECT
-        return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query_id, msg, True)
+def enter_order_shipping_time(_, bot, chat_id, msg_id=None, query_id=None, msg=None):
+    if msg is None:
+        msg = _('Please select time you\'d like to take order')
+    # if not order_now:
+    #     msg += '\n'
+    #     msg += messages.get_working_hours_msg(_)
+    #     state = enums.BOT_CHECKOUT_DATE_SELECT
+    #     return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query_id, msg, True)
     reply_markup = keyboards.order_select_time_keyboard(_)
     if msg_id:
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     else:
-        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     if query_id:
         bot.answer_callback_query(query_id)
     return enums.BOT_CHECKOUT_DATETIME_SELECT
@@ -485,13 +481,19 @@ def enter_order_identify(_, bot, chat_id, user_data, id_stages, msg=None, msg_id
     else:
         msg = ''
     msg += question.content
-    if msg_id:
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
+    if first_stage.type == 'phone':
+        reply_markup = keyboards.phone_number_request_keyboard(_)
+        state = enums.BOT_CHECKOUT_IDENTIFY_PHONE
     else:
-        bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
+        reply_markup = keyboards.back_cancel_keyboard(_)
+        state = enums.BOT_CHECKOUT_IDENTIFY
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
     if query_id:
         bot.answer_callback_query(query_id)
-    return enums.BOT_CHECKOUT_IDENTIFY
+    return state
 
 
 def enter_order_payment_type(_, bot, chat_id, msg_id=None, query_id=None):
@@ -544,8 +546,8 @@ def enter_btc_too_low(_, bot, chat_id, msg_id=None, query_id=None):
 
 def enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id=None, query_id=None):
     user = User.get(telegram_id=user_id)
-    total = Cart.get_cart_total(user_data, user.currency)
-    products_info = Cart.get_products_info(user_data, user.currency)
+    total = Cart.get_cart_total(user_data, user)
+    products_info = Cart.get_products_info(user_data, user)
     order_details = user_data['order_details']
     btc_payment = order_details.get('btc_payment')
     location_id = order_details.get('location_id')
@@ -586,8 +588,9 @@ def enter_price_groups_list(_, bot, chat_id, msg_id, query_id, msg=None, page=1)
 def enter_price_group_selected(_, bot, chat_id, group_id, msg_id=None, query_id=None):
     group = GroupProductCount.get(id=group_id)
     product_counts = ProductCount.select(ProductCount.count, ProductCount.price) \
-        .where(ProductCount.product_group == group).tuples()
-    products = Product.select(Product.title).where(Product.group_price == group)
+        .where(ProductCount.price_group == group).tuples()
+    products = Product.select(Product.title).join(ProductGroupCount)\
+        .where(ProductGroupCount.price_group == group).group_by(Product.id)
     group_name = escape(group.name)
     msg = _('Product price group:\n<i>{}</i>').format(group_name)
     msg += '\n\n'
@@ -611,6 +614,14 @@ def enter_price_group_selected(_, bot, chat_id, group_id, msg_id=None, query_id=
         msg += ', '.join(group_perm.permission.get_permission_display() for group_perm in permissions)
     else:
         msg += 'All clients'
+    specific_clients = User.select().join(UserGroupCount)\
+        .where(UserGroupCount.price_group == group, User.banned == False).group_by(User.id)
+    if specific_clients.exists():
+        msg += '\n\n'
+        msg += _('Specific clients:')
+        msg += '\n'
+        specific_clients = ', '.join([escape(user.username) for user in specific_clients])
+        msg += specific_clients
     keyboard = keyboards.create_product_price_group_selected_keyboard(_, group.id)
     if msg_id:
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.HTML)
@@ -653,3 +664,79 @@ def enter_courier_main_menu(_, bot, chat_id, user, order, msg_id=None, query_id=
         bot.answer_callback_query(query_id)
     if return_state:
         return enums.COURIER_STATE_INIT
+
+
+def enter_lottery_settings(_, bot, chat_id, msg_id=None, query_id=None, query_msg=None, msg=None):
+    if not msg:
+        msg = _('⚙️ Lottery settings')
+    reply_markup = keyboards.lottery_settings_keyboard(_)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    if query_id:
+        if query_msg:
+            bot.answer_callback_query(query_id, text=query_msg, show_alert=True)
+        else:
+            bot.answer_callback_query(query_id)
+    return enums.ADMIN_LOTTERY_SETTINGS
+
+
+def enter_lottery_settings_participants(_, bot, chat_id, lottery, msg_id=None, query_id=None, query_msg=None):
+    tickets_used = LotteryParticipant.select() \
+        .where(LotteryParticipant.lottery == lottery, LotteryParticipant.is_pending == False).count()
+    permissions = LotteryPermission.select().where(LotteryPermission.lottery == lottery)
+    permissions = 'All clients' if not permissions.exists() else ', '.join(
+        [perm.permission.get_permission_display() for perm in permissions])
+    msg = _('Total tickets number: {}').format(lottery.num_tickets)
+    msg += '\n'
+    msg += _('Tickets used: {}').format(tickets_used)
+    msg += '\n\n'
+    msg += _('Special clients:')
+    msg += '\n'
+    msg += permissions
+    reply_markup = keyboards.lottery_participants_keyboard(_)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    if query_id:
+        if query_msg:
+            bot.answer_callback_query(query_id, query_msg, show_alert=True)
+        else:
+            bot.answer_callback_query(query_id)
+    return enums.ADMIN_LOTTERY_PARTICIPANTS
+
+
+def enter_lottery_conditions(_, bot, chat_id, lottery, msg_id, query_id):
+    msg = _('🧾 Participation conditions')
+    msg += '\n\n'
+    if lottery.by_condition == lottery.PRICE:
+        msg += _('Min price: {}{}').format(lottery.min_price, get_currency_symbol())
+        msg += '\n'
+    msg += _('By: {}').format(lottery.products_condition_display)
+    if lottery.products_condition == lottery.SINGLE_PRODUCT:
+        msg += '\n'
+        msg += 'Product: {}'.format(lottery.single_product_condition.title)
+    elif lottery.products_condition == lottery.CATEGORY:
+        if lottery.products_condition == lottery.SINGLE_PRODUCT:
+            msg += '\n'
+            msg += 'Category: {}'.format(lottery.category_condition.title)
+    reply_markup = keyboards.lottery_conditions_keyboard(_)
+    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    bot.answer_callback_query(query_id)
+    return enums.ADMIN_LOTTERY_CONDITIONS
+
+
+def enter_lottery_messages(_, bot, chat_id, msg_id=None, query_id=None):
+    msg = _('💬 Lottery messages')
+    msg += '\n'
+    msg += _('Time interval: {} minutes').format(config.lottery_messages_interval)
+    reply_markup = keyboards.lottery_messages_keyboard(_)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    if query_id:
+        bot.answer_callback_query(query_id)
+    return enums.ADMIN_LOTTERY_MESSAGES

@@ -4,10 +4,12 @@ import math
 import random
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from peewee import JOIN
 
 from .cart_helper import Cart
 from .helpers import config
-from .models import Currencies, Channel, Location, Order, CourierLocation
+from .models import Currencies, Channel, Location, Order, CourierLocation, User, UserPermission, CourierChat, Lottery, \
+    ReviewQuestion
 
 
 def confirmation_keyboard(_):
@@ -171,6 +173,9 @@ def main_keyboard(_, user):
         buttons.append([InlineKeyboardButton(_('➡️ Registration'), callback_data='menu_register')])
     if user.user_orders:
         buttons.append([InlineKeyboardButton(_('📖 My Orders'), callback_data='menu_my_orders')])
+    chat_orders = Order.select().join(User, JOIN.LEFT_OUTER, on=Order.courier)\
+        .where(Order.user == user, User.permission == UserPermission.COURIER, Order.status == Order.PROCESSING)
+    if chat_orders.exists():
         buttons.append([InlineKeyboardButton(_('⌨️ Chat with courier'), callback_data='menu_chat')])
     if user.is_admin or user.is_logistic_manager:
         buttons.append([InlineKeyboardButton(_('⚙️ Settings'), callback_data='menu_settings')])
@@ -259,8 +264,46 @@ def admin_keyboard(_):
         [InlineKeyboardButton(_('⚙ Bot settings'),
                               callback_data='settings_bot')],
         [InlineKeyboardButton(_('👨 Users'), callback_data='settings_users')],
+        [InlineKeyboardButton(_('⭐️ Reviews'), callback_data='settings_reviews')],
         [InlineKeyboardButton(_('↩ Back'),
                               callback_data='settings_back')],
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def reviews_settings_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('📨 Pending reviews'), callback_data='reviews_pending')],
+        [InlineKeyboardButton(_('🌠 Show reviews'), callback_data='reviews_show')],
+        [InlineKeyboardButton(_('🧾 Reviews questions'), callback_data='reviews_questions')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='reviews_back')],
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def reviews_pending_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('✅ Approve'), callback_data='reviews_approve')],
+        [InlineKeyboardButton(_('⛔️ Decline'), callback_data='reviews_decline')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='reviews_back')],
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def reviews_show_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('📆 By date'), callback_data='reviews_date')],
+        [InlineKeyboardButton(_('👨 By client'), callback_data='reviews_client')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='reviews_back')],
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def reviews_questions_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('➕ Add new'), callback_data='reviews_add')],
+        [InlineKeyboardButton(_('🧾 Reviews questions'), callback_data='reviews_list')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='reviews_back')]
     ]
     return InlineKeyboardMarkup(buttons)
 
@@ -307,8 +350,18 @@ def top_clients_stats_keyboard(_):
 
 def order_select_time_keyboard(_):
     buttons = [
-        [InlineKeyboardButton(_('⏰ Now'), callback_data='now')],
-        [InlineKeyboardButton(_('📆 Select day and time'), callback_data='datetime')],
+        [InlineKeyboardButton(_('⏰ Closest time'), callback_data='now')],
+        [InlineKeyboardButton(_('📆 Pick day and time'), callback_data='datetime')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')],
+        [InlineKeyboardButton(_('❌ Cancel'), callback_data='cancel')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def order_select_time_today_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('⏱ Closest possible time'), callback_data='closest')],
+        [InlineKeyboardButton(_('⏰ Pick time'), callback_data='pick')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='back')],
         [InlineKeyboardButton(_('❌ Cancel'), callback_data='cancel')]
     ]
@@ -409,20 +462,82 @@ def bot_settings_keyboard(_, user):
     return InlineKeyboardMarkup(buttons)
 
 
-def lottery_settings_keyboard(_):
+def lottery_main_settings_keyboard(_):
     buttons = [
-        [InlineKeyboardButton(_('Lottery settings'), callback_data='lottery_settings')],
-        [InlineKeyboardButton(_('Create lottery'), callback_data='lottery_create')],
-        [InlineKeyboardButton(_('Show winners'), callback_data='lottery_winners')],
+        [InlineKeyboardButton(_('⚙️ Lottery settings'), callback_data='lottery_settings')],
+        [InlineKeyboardButton(_('🎰 Create lottery'), callback_data='lottery_create')],
+        [InlineKeyboardButton(_('🥇 Show winners'), callback_data='lottery_winners')],
+        [InlineKeyboardButton(_('💬 Lottery messages'), callback_data='lottery_messages')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='lottery_back')]
     ]
     return InlineKeyboardMarkup(buttons)
 
 
+def lottery_settings_keyboard(_):
+    lottery_active = Lottery.select().where(Lottery.completed_date == None, Lottery.active == True).exists()
+    lottery_on = _('Active: {}').format(_('✅ Yes') if lottery_active else _('⛔️ No'))
+    buttons = [
+        [InlineKeyboardButton(lottery_on, callback_data='lottery_on')],
+        [InlineKeyboardButton(_('👨‍👩‍👧‍👦 Number of winners'), callback_data='lottery_winners')],
+        [InlineKeyboardButton(_('🎫 Participants settings'), callback_data='lottery_participants')],
+        [InlineKeyboardButton(_('🧾 Participation conditions'), callback_data='lottery_conditions')],
+        [InlineKeyboardButton(_('🏆 Set prize'), callback_data='lottery_prize')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='lottery_back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def lottery_participants_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('🎫 Change tickets number'), callback_data='lottery_tickets')],
+        [InlineKeyboardButton(_('🔑 Allowed special clients'), callback_data='lottery_permissions')],
+        [InlineKeyboardButton(_('👫 Lottery participants'), callback_data='lottery_participants')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='lottery_back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def lottery_messages_keyboard(_):
+    active_str = _('✅ Yes') if config.lottery_messages else _('⛔️ No')
+    active_str = _('Active: {}').format(active_str)
+    buttons = [
+        [InlineKeyboardButton(active_str, callback_data='lottery_messages')],
+        # [InlineKeyboardButton(_('⭐ Select channels'), callback_data='lottery_channels')],
+        [InlineKeyboardButton(_('🕓 Set intervals'), callback_data='lottery_intervals')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='lottery_back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def lottery_conditions_keyboard(_):
+    lottery = Lottery.get(completed_date=None)
+    price_name = _('💲 By price')
+    product_name = _('🛍 By product')
+    if lottery.by_condition == lottery.PRICE:
+        price_name += ' ✅'
+    else:
+        product_name += ' ✅'
+    buttons = [
+        [InlineKeyboardButton(price_name, callback_data='lottery_price')],
+        [InlineKeyboardButton(product_name, callback_data='lottery_product')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='lottery_back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def lottery_products_condition_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('By single product'), callback_data='lottery_single')],
+        [InlineKeyboardButton(_('By category'), callback_data='lottery_category')],
+        [InlineKeyboardButton(_('By all products'), callback_data='lottery_all')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='lottery_back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
 
 def edit_messages_keyboard(_):
     buttons = [
-        # [InlineKeyboardButton(_('⏰ Edit working hours'), callback_data='working_hours')],
+
         [InlineKeyboardButton(_('☎️ Edit contact info'), callback_data='edit_msg_contact_info')],
         [InlineKeyboardButton(_('👋 Edit Welcome message'), callback_data='edit_msg_welcome')],
         [InlineKeyboardButton(_('🧾 Edit Order details message'), callback_data='edit_msg_order_details')],
@@ -802,7 +917,7 @@ def couriers_choose_keyboard(trans, couriers, order_id, message_id):
 def service_channel_keyboard(trans, order):
     _ = trans
     order_id = order.id
-    main_button_list = [
+    buttons = [
         [InlineKeyboardButton(_('🛵 Send order to courier channel'),
                               callback_data='order_send_to_couriers|{}'.format(order_id))],
         [InlineKeyboardButton(_('🚀 Send order to specific courier'),
@@ -819,10 +934,11 @@ def service_channel_keyboard(trans, order):
         [InlineKeyboardButton(_('💳 Hide Order'),
                               callback_data='order_hide|{}'.format(order_id))],
     ]
+    buttons.insert(3, [InlineKeyboardButton(_('⌨️ Courier chat log'), callback_data='order_chat_log|{}'.format(order_id))])
     if order.btc_payment:
-        main_button_list.insert(0, [InlineKeyboardButton(_('🔄 Refresh payment status'), callback_data='order_btc_refresh|{}'.format(order_id))])
-        main_button_list.insert(0, [InlineKeyboardButton(_('✉️ Send payment notification to client'), callback_data='order_btc_notification|{}'.format(order_id))])
-    return InlineKeyboardMarkup(main_button_list)
+        buttons.insert(0, [InlineKeyboardButton(_('🔄 Refresh payment status'), callback_data='order_btc_refresh|{}'.format(order_id))])
+        buttons.insert(0, [InlineKeyboardButton(_('✉️ Send payment notification to client'), callback_data='order_btc_notification|{}'.format(order_id))])
+    return InlineKeyboardMarkup(buttons)
 
 
 def cancel_order_confirm(trans, order_id):
@@ -852,16 +968,45 @@ def send_to_service_keyboard(_):
     return InlineKeyboardMarkup(buttons)
 
 
-def order_finished_keyboard(_, order_id, show=True):
-    buttons = [
-        [InlineKeyboardButton(_('❌ Delete Order'), callback_data='finished_order_delete|{}'.format(order_id))],
-        [InlineKeyboardButton(_('🎰 Add to lottery'), callback_data='finished_order_lottery|{}'.format(order_id))],
-    ]
+def order_finished_keyboard(_, order_id, show=True, lottery_available=False):
     if show:
-        btn = [InlineKeyboardButton(_('💳 Show Order'), callback_data='finished_order_show|{}'.format(order_id))]
+        buttons = [
+            [InlineKeyboardButton(_('💳 Show Order'), callback_data='finished_order_show|{}'.format(order_id))]
+        ]
     else:
-        btn = [InlineKeyboardButton(_('💳 Hide Order'), callback_data='finished_order_hide|{}'.format(order_id))]
-    buttons.insert(0, btn)
+        buttons = [
+            [InlineKeyboardButton(_('❌ Delete Order'), callback_data='finished_order_delete|{}'.format(order_id))],
+            [InlineKeyboardButton(_('💳 Hide Order'), callback_data='finished_order_hide|{}'.format(order_id))]
+        ]
+        if lottery_available:
+            buttons.insert(0, [InlineKeyboardButton(_('🎰 Add to lottery'), callback_data='finished_order_lottery|{}'.format(order_id))])
+    return InlineKeyboardMarkup(buttons)
+
+
+def client_order_finished_keyboard(_, order_id, lottery_available=False):
+    buttons = [
+        [InlineKeyboardButton(_('⭐️ Send a review'), callback_data='delivered_order_review|{}'.format(order_id))]
+    ]
+    if lottery_available:
+        buttons.append([InlineKeyboardButton(_('🎰 Join lottery'), callback_data='delivered_order_lottery|{}'.format(order_id))])
+    return InlineKeyboardMarkup(buttons)
+
+
+def client_order_review_keyboard(_, answers):
+    buttons = []
+    for question in ReviewQuestion.select():
+        buttons.append([InlineKeyboardButton(question.text, callback_data='review_ignore')])
+        q_buttons = []
+        for i in range(1, 6):
+            if i <= answers.get(question.id, 5):
+                text = '⭐️'
+            else:
+                text = '🌑'
+            q_buttons.append(InlineKeyboardButton(text, callback_data='review_question_{}_{}'.format(question.id, i)))
+        buttons.append(q_buttons)
+    buttons.append([InlineKeyboardButton(_('📝 Add a few words'), callback_data='review_words')])
+    buttons.append([InlineKeyboardButton(_('✅ Send review'), callback_data='review_send')])
+    buttons.append([InlineKeyboardButton(_('↩ Back'), callback_data='review_back')])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -965,12 +1110,11 @@ def are_you_sure_keyboard(_):
 def edit_identification_keyboard(_, questions):
     buttons = []
     for count, q in enumerate(questions, 1):
-        q_id, q_active, q_vip, q_order, q_content = q
+        q_id, q_active, q_order, q_content = q
         btn = [InlineKeyboardButton(_('Question №{}: {}').format(count, q_content), callback_data='id_edit|{}'.format(q_id))]
         buttons.append(btn)
         btn = [
-            InlineKeyboardButton(_('Vip: Active ✅') if q_vip else _('Vip: Disabled ⛔️'),
-                                 callback_data='id_vip_toggle|{}'.format(q_id)),
+            InlineKeyboardButton(_('👫 Special clients'), callback_data='id_permissions|{}'.format(q_id)),
             InlineKeyboardButton(_('For order: Active ✅') if  q_order else _('For order: Disabled ⛔️'),
                                  callback_data='id_order_toggle|{}'.format(q_id)),
         ]
@@ -997,6 +1141,14 @@ def create_edit_identification_type_keyboard(trans):
     return InlineKeyboardMarkup(buttons)
 
 
+def identification_type_text_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('🎫 ID Number'), callback_data='id')],
+        [InlineKeyboardButton(_('📞 Phone number'), callback_data='phone')],
+        [InlineKeyboardButton(_('📝 Text question'), callback_data='text')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
 
 
 def create_product_edit_media_keyboard(trans):
@@ -1060,18 +1212,12 @@ def create_product_price_groups_keyboard(trans):
     return InlineKeyboardMarkup(buttons)
 
 
-# def add_product_price_group_keyboard(_):
-#     buttons = [
-#         [InlineKeyboardButton(_('Add for special clients'), callback_data='special_clients')],
-#         [InlineKeyboardButton(_('Add for all clients'), callback_data='all_clients')]
-#     ]
-
-
 def create_product_price_group_selected_keyboard(trans, group_id):
     _ = trans
     buttons = [
         [InlineKeyboardButton(_('✏️ Edit price group'), callback_data='edit|{}'.format(group_id))],
         [InlineKeyboardButton(_('👫 Special clients'), callback_data='special_clients|{}'.format(group_id))],
+        [InlineKeyboardButton(_('🚶‍♂️ Specific clients'), callback_data='users|{}'.format(group_id))],
         [InlineKeyboardButton(_('❌ Delete price group'), callback_data='delete|{}'.format(group_id))],
         [InlineKeyboardButton(_('↩ Back'), callback_data='back|{}'.format(group_id))]
     ]
@@ -1154,3 +1300,19 @@ def create_bitcoin_retry_keyboard(trans, order_id):
 def start_btn(_):
     buttons = [InlineKeyboardButton(_('Start'), callback_data='start_bot')]
     return InlineKeyboardMarkup([buttons])
+
+
+def delete_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('♻️ Delete'), callback_data='delete')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def reviews_channel_button(_):
+    reviews_channel_url = Channel.get(conf_name='reviews_channel').link
+    buttons = [
+        [InlineKeyboardButton(_('⭐️ Reviews channel'), url=reviews_channel_url)]
+    ]
+    return InlineKeyboardMarkup(buttons)
