@@ -1,19 +1,16 @@
 import random
-from datetime import datetime
 from decimal import Decimal
-from telegram import ParseMode, ReplyKeyboardRemove
+from telegram import ParseMode
 from telegram.ext import ConversationHandler
 from telegram.utils.helpers import escape_markdown, escape
-from peewee import JOIN
 
 
 from . import keyboards, messages, enums, shortcuts
 from .cart_helper import Cart
-from .models import Location, User, OrderBtcPayment, Channel, IdentificationStage, UserPermission, CourierLocation, \
+from .models import Location, User, OrderBtcPayment, Channel, UserPermission, CourierLocation, \
     Product, WorkingHours, GroupProductCount, ProductCount, GroupProductCountPermission, Order, UserGroupCount, ProductGroupCount, \
     LotteryParticipant, LotteryPermission
-from .helpers import config, get_user_id, get_trans, is_vip_customer, is_admin, get_username, \
-    get_user_update_username, logger, get_currency_symbol
+from .helpers import config, get_user_id, get_trans, logger, get_currency_symbol
 from .btc_settings import BtcSettings
 from .btc_wrapper import CurrencyConverter
 
@@ -111,7 +108,10 @@ def enter_settings(_, bot, chat_id, user_id, query_id=None, msg_id=None, msg=Non
     if not msg:
         msg = _('⚙ Bot settings')
     user = User.get(telegram_id=user_id)
-    reply_markup = keyboards.bot_settings_keyboard(_, user)
+    if user.is_logistic_manager:
+        reply_markup = keyboards.bot_settings_logistic_manager_keyboard(_, user.allowed_settings)
+    else:
+        reply_markup = keyboards.bot_settings_keyboard(_)
     if msg_id:
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     else:
@@ -121,9 +121,10 @@ def enter_settings(_, bot, chat_id, user_id, query_id=None, msg_id=None, msg=Non
     return enums.ADMIN_BOT_SETTINGS
 
 
-def enter_settings_users(_, bot, chat_id, msg_id, query_id):
+def enter_settings_users(_, bot, chat_id, user_id, msg_id, query_id):
     msg = _('👨 Users')
-    reply_markup = keyboards.clients_keyboard(_)
+    user = User.get(telegram_id=user_id)
+    reply_markup = keyboards.clients_keyboard(_, user)
     bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
     return enums.ADMIN_USERS
@@ -189,11 +190,11 @@ def enter_pending_registrations_user(_, bot, chat_id, msg_id, query_id, user_dat
     return enums.ADMIN_PENDING_REGISTRATIONS_USER
 
 
-def enter_black_list(_, bot, chat_id, msg_id, query_id, page=1, msg=None):
+def enter_black_list(_, bot, chat_id, user_id, msg_id, query_id, page=1, msg=None):
     if not msg:
         msg = _('🔒 Black-list')
     users = User.select(User.username, User.id).join(UserPermission)\
-        .where(User.banned == True, UserPermission.permission != UserPermission.OWNER).tuples()
+        .where(User.banned == True, User.telegram_id != user_id, UserPermission.permission != UserPermission.OWNER).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, users, page_num=page)
     bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     bot.answer_callback_query(query_id)
@@ -221,10 +222,14 @@ def enter_courier_detail(_, bot, chat_id, msg_id, query_id, courier_id):
     return enums.ADMIN_COURIER_DETAIL
 
 
-def enter_order_options(_, bot, chat_id, msg_id=None, query_id=None, msg=None):
+def enter_order_options(_, bot, chat_id, user_id, msg_id=None, query_id=None, msg=None):
     if not msg:
         msg = _('💳 Order options')
-    reply_markup = keyboards.order_options_keyboard(_)
+    user = User.get(telegram_id=user_id)
+    if user.is_logistic_manager:
+        reply_markup = keyboards.logistic_manager_order_options_keyboard(_, user.allowed_settings)
+    else:
+        reply_markup = keyboards.order_options_keyboard(_)
     if msg_id:
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
     else:

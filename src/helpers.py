@@ -55,7 +55,7 @@ class ConfigHelper:
                       'btc_address': '', 'currency': Currencies.DOLLAR,
                       'currencies_api_key': '7405b1ae5a19aefdad05fe182b8e62b7',
                       'lottery_messages': 'false',
-                      'lottery_messages_interval': '120',
+                      'lottery_messages_interval': '2',
                       'lottery_messages_sent': ''})
         self.config.read(cfgfilename, encoding='utf-8')
         self.section = 'Settings'

@@ -1,4 +1,3 @@
-from collections import defaultdict
 import datetime
 from string import ascii_uppercase
 import random
@@ -10,30 +9,16 @@ from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
 from telegram.ext.dispatcher import run_async
 
-from .helpers import config, get_trans, logger, get_user_id, get_channel_trans, get_currency_symbol,\
+from .helpers import config, get_trans, get_channel_trans, get_currency_symbol,\
     get_service_channel
 from .btc_wrapper import CurrencyConverter, wallet_enable_hd
 from .cart_helper import Cart
 
-from .models import Order, OrderItem, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission,\
-    UserIdentificationAnswer, Product, ProductCategory, WorkingHours, Currencies, User, CurrencyRates, \
-    BitcoinCredentials, Channel, ChannelPermissions, Location, CourierChatMessage, CourierChat, \
-    GroupProductCount, GroupProductCountPermission, ProductGroupCount, UserGroupCount, Lottery, LotteryParticipant, \
-    LotteryPermission
-from . import keyboards, messages, states
-
-
-# def bot_send_order_msg(_, bot, chat_id, message, order_id, order_data=None, channel=False, parse_mode=ParseMode.MARKDOWN):
-#     order = Order.get(id=order_id)
-#     keyboard = keyboards.show_order_keyboard(_, order_id)
-#     if channel:
-#         msg_id = send_channel_msg(bot, message, chat_id, keyboard, order, parse_mode)
-#     else:
-#         order_msg = bot.send_message(chat_id, message, reply_markup=keyboard, parse_mode=parse_mode)
-#         msg_id = order_msg['message_id']
-#     order_data.order_hidden_text = message
-#     order_data.order_text_msg_id = str(msg_id)
-#     order_data.save()
+from .models import Order, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission, UserIdentificationAnswer, \
+    Product, WorkingHours, User, CurrencyRates, BitcoinCredentials, Channel, ChannelPermissions, CourierChatMessage, \
+    CourierChat, GroupProductCount, GroupProductCountPermission, ProductGroupCount, UserGroupCount, Lottery, \
+    LotteryParticipant, LotteryPermission, Ad, ChannelAd
+from . import keyboards, messages
 
 
 def send_order_identification_answers(bot, chat_id, order, send_one=False, channel=False):
@@ -41,9 +26,7 @@ def send_order_identification_answers(bot, chat_id, order, send_one=False, chann
     photos_answers = []
     photos = []
     class_map = {'photo': InputMediaPhoto, 'video': InputMediaVideo}
-    print('answer debug')
     for answer in order.identification_answers:
-        print(answer)
         type = answer.stage.type
         content = answer.content
         question = answer.question.content
@@ -202,69 +185,6 @@ def get_date_subquery(model, first_date=None, second_date=None, year=None, month
     return query
 
 
-def check_order_products_credits(order, courier=None):
-
-    for order_item in order.order_items:
-        product = order_item.product
-        if product.warehouse_active:
-            if courier:
-                try:
-                    warehouse = ProductWarehouse.get(product=product, courier=courier)
-                    warehouse_count = warehouse.count
-                except ProductWarehouse.DoesNotExist:
-                    warehouse_count = 0
-                    # warehouse = ProductWarehouse(product=product, courier=courier)
-                    # warehouse.save()
-            else:
-                warehouse_count = product.credits
-
-        product_warehouse = ProductWarehouse.get(product=product)
-        product_warehouse_count = product_warehouse.count
-        if product_warehouse_count <= 0:
-            not_defined = True
-            return not_defined
-
-
-# def check_order_products_credits(order, trans, courier=None):
-#     msg = ''
-#     first_msg = True
-#     not_defined = False
-#     for order_item in order.order_items:
-#         product = order_item.product
-#         if courier:
-#             try:
-#                 warehouse = ProductWarehouse.get(product=product, courier=courier)
-#                 warehouse_count = warehouse.count
-#             except ProductWarehouse.DoesNotExist:
-#                 warehouse = ProductWarehouse(product=product, courier=courier)
-#                 warehouse.save()
-#         else:
-#             warehouse_count = product.credits
-#         product_warehouse = ProductWarehouse.get(product=product)
-#         product_warehouse_count = product_warehouse.count
-#         # if product_warehouse_count <= 0:
-#         #     not_defined = True
-#         #     return not_defined
-#         if order_item.count > warehouse_count:
-#             _ = trans
-#             product_title = escape_markdown(product.title.replace('`', ''))
-#             if courier:
-#                 if first_msg:
-#                     msg += _('You don\'t have enough credits to deliver products:\n')
-#                     first_msg = False
-#                 msg += _('Product: `{}`\nCount: {}\nCourier credits: {}\n').format(product_title,
-#                                                                                    order_item.count,
-#                                                                                    warehouse_count)
-#             else:
-#                 if first_msg:
-#                     msg += _('There are not enough credits in warehouse to deliver products:\n')
-#                     first_msg = False
-#                 msg += _('Product: `{}`\nCount: {}\nWarehouse credits: {}\n').format(product_title,
-#                                                                                      order_item.count,
-#                                                                                      warehouse_count)
-#     return msg
-
-
 def change_order_products_credits(order, add=False, courier=None):
     if add:
         op = operator.add
@@ -353,11 +273,8 @@ def get_all_product_counts(product):
     if product.price_groups:
         price_groups = [group.price_group for group in product.price_groups]
         counts = ProductCount.select().where(ProductCount.price_group.in_(price_groups))
-        print('group debug')
     else:
         counts = ProductCount.select().where(ProductCount.product == product)
-        print('simple')
-    print(counts)
     counts = set([item.count for item in counts])
     counts = list(counts)
     counts.sort()
@@ -373,16 +290,16 @@ def get_users_products(user, category=None):
     user_group_prices = GroupProductCount.select().join(GroupProductCountPermission, JOIN.LEFT_OUTER) \
         .switch(GroupProductCount).join(UserGroupCount, JOIN.LEFT_OUTER).where(db_query).group_by(GroupProductCount.id)
     user_group_prices = list(user_group_prices)
-    print('debug groups')
-    for ugp in user_group_prices:
-        print(ugp.name)
+    # print('debug groups')
+    # for ugp in user_group_prices:
+    #     print(ugp.name)
     db_query = (ProductGroupCount.price_group.is_null(True) | ProductGroupCount.price_group.in_(user_group_prices))
     db_query = [Product.is_active == True, db_query]
     if category:
         db_query.append(Product.category == category)
     products = Product.select().join(ProductGroupCount).where(*db_query).group_by(Product.id)
-    print('prods debug')
-    print(list(products))
+    # print('prods debug')
+    # print(list(products))
     return products
 
 
@@ -394,54 +311,6 @@ def get_full_product_info(product, price_group):
         query = (ProductCount.product == product)
     rows = ProductCount.select(ProductCount.count, ProductCount.price).where(query).tuples()
     return product_title, rows
-
-
-def send_menu_msg(_, bot, user, products_info, chat_id, msg_id=None, query_id=None):
-    if products_info:
-        msg = messages.create_cart_details_msg(user.id, products_info)
-    else:
-        first_name = escape_markdown(user.username)
-        msg = config.welcome_text.format(first_name)
-    reply_markup = keyboards.main_keyboard(_, user)
-    if msg_id:
-        main_msg = bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    else:
-        main_msg = bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    if query_id:
-        bot.answer_callback_query(query_id)
-    return main_msg['message_id']
-
-
-# def product_inactive(_, bot, user_data, update, product, currency):
-#     query = update.callback_query
-#     chat_id = update.effective_chat.id
-#     msg = _('Sorry, product "{}" is not active now.').format(product.title)
-#     query.answer(msg)
-#     Cart.remove_all(user_data, product.id)
-#     products_msgs = user_data.get('products_msgs')
-#     if products_msgs:
-#         for p_msg_id in products_msgs:
-#             bot.delete_message(chat_id, p_msg_id)
-#         del user_data['products_msgs']
-#     category_id = user_data.get('category_id')
-#     if category_id:
-#         cat = ProductCategory.get(id=category_id)
-#         cat_title = escape_markdown(cat.title)
-#         msg = _('Category `{}` products:').format(cat_title)
-#         cat_msg = bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN)
-#         products_msgs = [cat_msg['message_id']]
-#         products = Product.select().where(Product.is_active == True, Product.category == cat)
-#         if products.exists():
-#             products_msgs += send_products(_, bot, user_data, chat_id, products, currency)
-#             user_data['products_msgs'] = products_msgs
-#         return states.enter_menu(bot, update, user_data)
-#     else:
-#         products = Product.select().where(Product.is_active == True)
-#         if products.exists():
-#             products_msgs = send_products(_, bot, user_data, chat_id, products, currency)
-#             user_data['products_msgs'] = products_msgs
-#         menu_msg_id = user_data['menu_id']
-#         return states.enter_menu(bot, update, user_data, menu_msg_id)
 
 
 def send_channel_msg(bot, msg, chat_id, keyboard=None, order=None, parse_mode=ParseMode.MARKDOWN,):
@@ -650,6 +519,7 @@ def generate_lottery_code(all_codes):
         if new_code not in all_codes:
             return new_code
 
+
 @run_async
 def manage_lottery_participants(bot):
     try:
@@ -692,7 +562,7 @@ def send_lottery_messages(bot):
         last_sent_date = config.lottery_messages_sent
         if last_sent_date:
             now = datetime.datetime.now()
-            interval = datetime.timedelta(minutes=config.lottery_messages_interval)
+            interval = datetime.timedelta(hours=config.lottery_messages_interval)
             time_remains = (last_sent_date + interval) - now
             if time_remains.days >= 0:
                 time.sleep(time_remains.total_seconds())
@@ -724,6 +594,38 @@ def send_lottery_messages(bot):
                 bot.send_message(channel.channel_id, msg, parse_mode=ParseMode.MARKDOWN, timeout=20)
         now = datetime.datetime.now()
         config.set_datetime_value('lottery_messages_sent', now)
+
+
+@run_async
+def send_channel_advertisments(bot):
+
+    def send_ad(ad):
+        channels = Channel.select().join(ChannelAd, JOIN.LEFT_OUTER).where(ChannelAd.ad == ad)
+        for channel in channels:
+            func = getattr(bot, 'send_{}'.format(ad.media_type))
+            func(channel.channel_id, ad.media, caption=ad.text)
+        ad.last_sent_date = datetime.datetime.now()
+        ad.save()
+
+    while True:
+        ads = Ad.select()
+        if ads.exists():
+            ads_to_send = []
+            for ad in ads:
+                if ad.last_sent_date:
+                    now = datetime.datetime.now()
+                    interval = datetime.timedelta(hours=ad.interval)
+                    time_remains = (ad.last_sent_date + interval) - now
+                    if time_remains.days >= 0:
+                        ads_to_send.append((ad, time_remains))
+                        continue
+                send_ad(ad)
+            if ads_to_send:
+                ad, time_remains = min(ads_to_send, key=lambda x: x[1])
+                time.sleep(time_remains.total_seconds())
+                send_ad(ad)
+        else:
+            break
 
 
 def check_lottery_available(order):

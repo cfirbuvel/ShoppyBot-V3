@@ -4,7 +4,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ConversationHandl
 
 from src import admin_handlers, courier_handlers, handlers, enums, shortcuts
 from src.helpers import config, get_user_id, get_channel_trans
-from src.shortcuts import send_lottery_messages, manage_lottery_participants
+from src.shortcuts import send_lottery_messages, manage_lottery_participants, send_channel_advertisments
 
 # from src.shortcuts import on_drop_order, make_confirm, make_unconfirm
 
@@ -390,7 +390,7 @@ def main():
                 CommandHandler('cancel', admin_handlers.on_cancel)
             ],
             enums.ADMIN_PRODUCT_PRICES_GROUP: [
-                CallbackQueryHandler(admin_handlers.on_product_price_group, pattern='^(back|page|select)', pass_user_data=True)
+                CallbackQueryHandler(admin_handlers.on_product_price_group, pattern='^(done|page|select)', pass_user_data=True)
             ],
             enums.ADMIN_PRODUCT_MEDIA: [
                 MessageHandler(Filters.text | Filters.photo | Filters.video, admin_handlers.on_product_media,
@@ -468,6 +468,56 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_channel_add, pattern='^(done|select)', pass_user_data=True),
                 CommandHandler('cancel', admin_handlers.on_cancel)
             ],
+            enums.ADMIN_ADVERTISMENTS: [
+                CallbackQueryHandler(admin_handlers.on_advertisments, pattern='^ads', pass_user_data=True)
+            ],
+            enums.ADMIN_CREATE_AD_TITLE: [
+                CallbackQueryHandler(admin_handlers.on_create_ad_title, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_create_ad_title, pass_user_data=True)
+            ],
+            enums.ADMIN_CREATE_AD_TEXT: [
+                CallbackQueryHandler(admin_handlers.on_create_ad_text, pattern='^(back|cancel)', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_create_ad_text, pass_user_data=True)
+            ],
+            enums.ADMIN_CREATE_AD_MEDIA: [
+                CallbackQueryHandler(admin_handlers.on_create_ad_media, pattern='^(back|cancel)', pass_user_data=True),
+                MessageHandler(Filters.photo | Filters.animation, admin_handlers.on_create_ad_media, pass_user_data=True)
+            ],
+            enums.ADMIN_CREATE_AD_CHANNELS: [
+                CallbackQueryHandler(admin_handlers.on_create_ad_channels, pattern='^(done|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_CREATE_AD_INTERVAL: [
+                CallbackQueryHandler(admin_handlers.on_create_ad_interval, pattern='^(back|cancel)', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_create_ad_interval, pass_user_data=True)
+            ],
+            enums.ADMIN_ADS_LIST: [
+                CallbackQueryHandler(admin_handlers.on_ads_list, pattern='^(page|select|back)', pass_user_data=True)
+            ],
+            enums.ADMIN_AD_SELECTED: [
+                CallbackQueryHandler(admin_handlers.on_ad_selected, pattern='^(back|edit|delete)', pass_user_data=True)
+            ],
+            enums.ADMIN_AD_EDIT: [
+                CallbackQueryHandler(admin_handlers.on_ad_edit, pattern='^ad', pass_user_data=True)
+            ],
+            enums.ADMIN_AD_EDIT_TITLE: [
+                CallbackQueryHandler(admin_handlers.on_ad_edit_title, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_ad_edit_title, pass_user_data=True)
+            ],
+            enums.ADMIN_AD_EDIT_TEXT: [
+                CallbackQueryHandler(admin_handlers.on_ad_edit_text, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_ad_edit_text, pass_user_data=True)
+            ],
+            enums.ADMIN_AD_EDIT_MEDIA: [
+                CallbackQueryHandler(admin_handlers.on_ad_edit_media, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.photo | Filters.animation, admin_handlers.on_ad_edit_media, pass_user_data=True)
+            ],
+            enums.ADMIN_AD_EDIT_INTERVAL: [
+                CallbackQueryHandler(admin_handlers.on_ad_edit_interval, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_ad_edit_interval, pass_user_data=True)
+            ],
+            enums.ADMIN_AD_EDIT_CHANNELS: [
+                CallbackQueryHandler(admin_handlers.on_ad_edit_channels, pattern='^(done|select)', pass_user_data=True)
+            ],
             enums.ADMIN_USERS: [
                 CallbackQueryHandler(admin_handlers.on_users, pattern='^users', pass_user_data=True),
                 CommandHandler('cancel', admin_handlers.on_cancel)
@@ -518,6 +568,12 @@ def main():
             enums.ADMIN_BLACK_LIST_USER: [
                 CallbackQueryHandler(admin_handlers.on_black_list_user, pattern='^black_list', pass_user_data=True),
                 CommandHandler('cancel', admin_handlers.on_cancel)
+            ],
+            enums.ADMIN_LOGISTIC_MANAGERS: [
+                CallbackQueryHandler(admin_handlers.on_logistic_managers, pattern='^(back|page|select)', pass_user_data=True)
+            ],
+            enums.ADMIN_LOGISTIC_MANAGER_SETTINGS: [
+                CallbackQueryHandler(admin_handlers.on_logistic_manager_settings, pattern='logistic', pass_user_data=True)
             ],
             enums.ADMIN_BOT_LANGUAGE: [
                 CallbackQueryHandler(admin_handlers.on_bot_language, pattern='^(back|iw|en)', pass_user_data=True)
@@ -770,6 +826,7 @@ def main():
     updater.dispatcher.add_error_handler(handlers.on_error)
     start_orders_processing(updater.bot)
     send_lottery_messages(updater.bot)
+    send_channel_advertisments(updater.bot)
     manage_lottery_participants(updater.bot)
     updater.start_polling()
     updater.idle()

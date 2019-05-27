@@ -106,10 +106,6 @@ class UserPermission(BaseModel):
         return users_permissions
 
 
-# class LogisticManagerPermission(BaseModel):
-#     permission =
-
-
 class User(BaseModel):
     username = CharField(null=True)
     telegram_id = IntegerField()
@@ -119,8 +115,6 @@ class User(BaseModel):
     banned = BooleanField(default=False)
     registration_time = DateTimeField(default=datetime.datetime.now)
     currency = CharField(default=Currencies.DOLLAR, choices=Currencies.CHOICES)
-    # group_price = ForeignKeyField(GroupProductCount, null=True, related_name='users')
-    # group_perm = ForeignKeyField(GroupProductCountPermission, null=True, related_name='users')
 
     @property
     def is_admin(self):
@@ -147,7 +141,30 @@ class User(BaseModel):
         return self.permission.permission == UserPermission.COURIER
 
 
-    # user = ForeignKeyField(User, related_name='group_permissions')
+class AllowedSetting(BaseModel):
+    COURIERS = 1
+    BOT_STATUS = 2
+    STATISTICS = 3
+    USERS = 4
+    REVIEWS = 5
+    WORKING_HOURS = 6
+    BOT_MESSAGES = 7
+    LOTTERY = 8
+    CHANNELS = 9
+    ADVERTISMENTS = 10
+    ORDERS = 11
+    MY_PRODUCTS = 12
+    CATEGORIES = 13
+    WAREHOUSE = 14
+    DISCOUNT = 15
+    DELIVERY = 16
+    PRICE_GROUPS = 17
+    LOCATIONS = 18
+    ID_PROCESS = 19
+    DEFAULT_LANGUAGE = 20
+
+    setting = IntegerField()
+    user = ForeignKeyField(User, related_name='allowed_settings')
 
 
 class CourierLocation(BaseModel):
@@ -184,7 +201,6 @@ class Product(BaseModel):
     credits = IntegerField(default=0)
     warehouse_active = BooleanField(default=False)
     category = ForeignKeyField(ProductCategory, related_name='products', null=True)
-    # group_price = ForeignKeyField(GroupProductCount, related_name='products', null=True)
 
 
 class ProductGroupCount(BaseModel):
@@ -200,7 +216,6 @@ class UserGroupCount(BaseModel):
 class GroupProductCountPermission(BaseModel):
     price_group = ForeignKeyField(GroupProductCount, related_name='permissions')
     permission = ForeignKeyField(UserPermission, related_name='price_groups')
-    # product = ForeignKeyField(Product, related_name='group_counts')
 
 
 class ProductCount(BaseModel):
@@ -251,7 +266,6 @@ class Order(BaseModel):
     client_notified = BooleanField(default=False)
     date_created = DateTimeField(default=datetime.datetime.now)
     address = CharField(default='', null=True)
-    # phone_number = CharField(default='', null=True)
     total_cost = DecimalField(default=0)
     btc_payment = BooleanField(default=False)
     coordinates = CharField(null=True)
@@ -309,11 +323,8 @@ class OrderItem(BaseModel):
 
 class IdentificationStage(BaseModel):
     active = BooleanField(default=True)
-    # vip_required = BooleanField(default=False)
-    # permission = ForeignKeyField(UserPermission, related_name='id_stages')
     for_order = BooleanField(default=False)
     type = CharField()
-    # actual_type = CharField()
 
 
 class IdentificationPermission(BaseModel):
@@ -331,7 +342,6 @@ class UserIdentificationAnswer(BaseModel):
     question = ForeignKeyField(IdentificationQuestion, related_name='identification_answers')
     user = ForeignKeyField(User, related_name='identification_answers')
     content = CharField()
-    # actual_type = CharField()
 
 
 class OrderIdentificationAnswer(BaseModel):
@@ -339,7 +349,6 @@ class OrderIdentificationAnswer(BaseModel):
     question = ForeignKeyField(IdentificationQuestion, related_name='identification_answers')
     order = ForeignKeyField(Order, related_name='identification_answers')
     content = CharField()
-    # actual_type = CharField()
     msg_id = CharField(null=True)
 
 
@@ -353,7 +362,6 @@ class CurrencyRates(BaseModel):
     currency = CharField(default=Currencies.DOLLAR, choices=Currencies.CHOICES)
     btc_rate = DecimalField()
     dollar_rate = DecimalField()
-    # last_updated = DateTimeField(default=datetime.datetime.now)
 
 
 class BitcoinCredentials(BaseModel):
@@ -411,7 +419,6 @@ class Lottery(BaseModel):
     min_price = DecimalField(null=True)
     prize_product = ForeignKeyField(Product, null=True)
     prize_count = IntegerField(null=True)
-    # message_sent_date = DateTimeField(null=True)
 
     @property
     def could_activate(self):
@@ -444,8 +451,6 @@ class LotteryParticipant(BaseModel):
 class Review(BaseModel):
     user = ForeignKeyField(User, related_name='reviews')
     order = ForeignKeyField(Order, related_name='reviews')
-    # product_rank = IntegerField(default=5)
-    # delivery_rank = IntegerField(default=5)
     text = CharField(null=True)
     date_created = DateTimeField(default=datetime.datetime.now)
     is_pending = BooleanField(default=True)
@@ -453,7 +458,6 @@ class Review(BaseModel):
 
 class ReviewQuestion(BaseModel):
     text = CharField()
-    # conf_name = CharField()
 
 
 class ReviewQuestionRank(BaseModel):
@@ -462,9 +466,18 @@ class ReviewQuestionRank(BaseModel):
     rank = IntegerField(default=5)
 
 
-class Task(BaseModel):
-    LOTTERY_MESSAGES = 1
+class Ad(BaseModel):
+    title = CharField()
+    text = CharField()
+    media = CharField(null=True)
+    media_type = CharField(null=True)
+    interval = IntegerField(default=2)
+    last_sent_date = DateTimeField(null=True)
 
+
+class ChannelAd(BaseModel):
+    channel = ForeignKeyField(Channel, related_name='ads')
+    ad = ForeignKeyField(Ad, related_name='channels')
 
 
 def create_tables():
@@ -481,7 +494,8 @@ def create_tables():
             OrderIdentificationAnswer, IdentificationQuestion, ChannelMessageData, GroupProductCount,
             CurrencyRates, BitcoinCredentials, OrderBtcPayment, BtcProc, ConfigValue, UserIdentificationAnswer, CourierLocation,
             WorkingHours, GroupProductCountPermission, CourierChat, CourierChatMessage, IdentificationPermission,
-            Lottery, LotteryParticipant, LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion, ReviewQuestionRank
+            Lottery, LotteryParticipant, LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion,
+            ReviewQuestionRank, Ad, ChannelAd, AllowedSetting
         ], safe=True
     )
 

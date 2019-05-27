@@ -13,7 +13,6 @@ from .btc_wrapper import CurrencyConverter
 
 def create_cart_details_msg(user_id, products_info):
     _ = get_trans(user_id)
-    # currency = get_currency_symbol()
     user = User.get(telegram_id=user_id)
     currency_sym = Currencies.CURRENCIES[user.currency][1]
     msg = '▫️◾️◽️◼️◻️⬛️◻️◼️◽️◾️▫️'
@@ -41,7 +40,6 @@ def create_product_description(_, currency, product_title, product_prices, produ
     text += '〰️'
     text += '\n'
 
-    # currency = get_currency_symbol()
     currency_sym = Currencies.CURRENCIES[currency][1]
     CurrencyConverter.fetch_update_currencies()
     if Location.select().exists():
@@ -199,7 +197,6 @@ def create_confirmation_text(user_id, order_details, total, products_info, deliv
     text += '\n'
     btc_value = None
     if btc_payment:
-        # total = CurrencyConverter.convert_currencies(total, user.currency, currency)
         btc_info = CurrencyConverter().convert_to_btc(currency, total)
         if btc_info:
             btc_value = btc_info
@@ -267,19 +264,6 @@ def create_service_notice(_, order, btc_data=None, for_courier=False):
             total -= discount_num
         text += '\n'
         text += _('Discount: {}').format(discount_str)
-    # discount_min = config.discount_min
-    # if discount_min != 0:
-    #     discount_num = calculate_discount_percents(discount, total)
-    #     if discount_num and total >= discount_min:
-    #         if not discount.endswith('%'):
-    #             discount_str = '{}'.format(discount)
-    #             discount_str += '{}'.format(currency)
-    #             total -= int(discount)
-    #         else:
-    #             discount_str = discount
-    #             total -= discount_num
-    #         text += '\n'
-    #         text += _('Discount: {}').format(discount_str)
 
     total += order.delivery_fee
 

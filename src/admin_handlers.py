@@ -5,37 +5,21 @@ import random
 from telegram import ParseMode
 from telegram import ReplyKeyboardRemove
 from telegram.error import TelegramError
-from telegram.ext import ConversationHandler
 from telegram.utils.helpers import escape_markdown, escape
 from peewee import fn, JOIN
 
 from . import enums, keyboards, shortcuts, messages, states
-from . import shortcuts
-from . import messages
-from .btc_wrapper import wallet_enable_hd, CurrencyConverter
-from .btc_settings import BtcSettings
-from .cart_helper import Cart
-from .decorators import user_passes
+from .btc_wrapper import CurrencyConverter
+from .decorators import user_passes, user_allowed
 from .btc_processor import process_btc_payment, set_btc_proc
-from .helpers import get_user_id, config, get_trans, parse_discount, get_channel_trans, get_locale, get_username,\
-    logger, is_admin, fix_markdown, get_service_channel, get_currency_symbol, get_reviews_channel
+from .helpers import get_user_id, config, get_trans, parse_discount, get_channel_trans, fix_markdown, \
+    get_service_channel, get_currency_symbol, get_reviews_channel
 from .models import Product, ProductCount, Location, ProductWarehouse, User, \
     ProductMedia, ProductCategory, IdentificationStage, Order, IdentificationQuestion, \
     ChannelMessageData, GroupProductCount, delete_db, create_tables, Currencies, BitcoinCredentials, \
     Channel, UserPermission, ChannelPermissions, CourierLocation, WorkingHours, GroupProductCountPermission, \
     OrderBtcPayment, CurrencyRates, BtcProc, OrderItem, IdentificationPermission, Lottery, LotteryParticipant, \
-    LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion, ReviewQuestionRank
-
-
-def on_cmd_add_product(bot, update):
-    user_id = get_user_id(update)
-    _ = get_trans(user_id)
-    update.message.reply_text(
-        text=_('Enter new product title'),
-        reply_markup=ReplyKeyboardRemove(),
-        parse_mode=ParseMode.MARKDOWN,
-    )
-    return enums.ADMIN_TXT_PRODUCT_TITLE
+    LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion, Ad, ChannelAd, AllowedSetting
 
 
 @user_passes
@@ -54,7 +38,7 @@ def on_settings_menu(bot, update, user_data):
     elif data == 'settings_bot':
         return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id)
     elif data == 'settings_users':
-        return states.enter_settings_users(_, bot, chat_id, msg_id, query.id)
+        return states.enter_settings_users(_, bot, chat_id, user_id, msg_id, query.id)
     elif data == 'settings_reviews':
         msg = _('⭐️ Reviews')
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.reviews_settings_keyboard(_))
@@ -65,6 +49,7 @@ def on_settings_menu(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews(bot, update, user_data):
     query = update.callback_query
@@ -95,6 +80,7 @@ def on_reviews(bot, update, user_data):
         return states.enter_settings(_, bot, chat_id, user_id, query_id=query.id, msg_id=msg_id)
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_pending(bot, update, user_data):
     query = update.callback_query
@@ -128,6 +114,7 @@ def on_reviews_pending(bot, update, user_data):
         return enums.ADMIN_REVIEWS
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_pending_select(bot, update, user_data):
     query = update.callback_query
@@ -170,6 +157,7 @@ def on_reviews_pending_select(bot, update, user_data):
         return enums.ADMIN_REVIEWS_PENDING
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_show(bot, update, user_data):
     query = update.callback_query
@@ -198,7 +186,7 @@ def on_reviews_show(bot, update, user_data):
         return enums.ADMIN_REVIEWS
 
 
-
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_by_date(bot, update, user_data):
     query = update.callback_query
@@ -245,6 +233,7 @@ def on_reviews_by_date(bot, update, user_data):
         return enums.ADMIN_REVIEWS_SHOW
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_by_date_select(bot, update, user_data):
     query = update.callback_query
@@ -275,6 +264,7 @@ def on_reviews_by_date_select(bot, update, user_data):
         return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_by_client_permissions(bot, update, user_data):
     query = update.callback_query
@@ -300,6 +290,7 @@ def on_reviews_by_client_permissions(bot, update, user_data):
         return enums.ADMIN_REVIEWS_SHOW
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_by_client(bot, update, user_data):
     query = update.callback_query
@@ -343,6 +334,7 @@ def on_reviews_by_client(bot, update, user_data):
         return enums.ADMIN_REVIEWS_BY_CLIENT_PERMISSIONS
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_by_client_list(bot, update, user_data):
     query = update.callback_query
@@ -379,6 +371,7 @@ def on_reviews_by_client_list(bot, update, user_data):
         return enums.ADMIN_REVIEWS_BY_CLIENT
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_questions(bot, update, user_data):
     query = update.callback_query
@@ -405,6 +398,7 @@ def on_reviews_questions(bot, update, user_data):
         return enums.ADMIN_REVIEWS
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_questions_new(bot, update, user_data):
     query = update.callback_query
@@ -423,6 +417,7 @@ def on_reviews_questions_new(bot, update, user_data):
     return enums.ADMIN_REVIEWS_QUESTIONS
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_questions_list(bot, update, user_data):
     query = update.callback_query
@@ -448,6 +443,7 @@ def on_reviews_questions_list(bot, update, user_data):
         return enums.ADMIN_REVIEWS_QUESTIONS
 
 
+@user_allowed(AllowedSetting.REVIEWS)
 @user_passes
 def on_reviews_questions_select(bot, update, user_data):
     query = update.callback_query
@@ -470,6 +466,8 @@ def on_reviews_questions_select(bot, update, user_data):
         return enums.ADMIN_REVIEWS_QUESTIONS_LIST
 
 
+@user_allowed(AllowedSetting.STATISTICS)
+@user_passes
 def on_statistics_menu(bot, update, user_data):
     query = update.callback_query
     action = query.data
@@ -480,7 +478,7 @@ def on_statistics_menu(bot, update, user_data):
         bot.edit_message_text(chat_id=chat_id,
                               message_id=msg_id,
                               text=_('⚙️ Settings'),
-                              reply_markup=keyboards.admin_keyboard(_),
+                              reply_markup=keyboards.settings_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_MENU
@@ -520,6 +518,7 @@ def on_statistics_menu(bot, update, user_data):
         return enums.ADMIN_STATISTICS_USERS
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_general(bot, update, user_data):
     query = update.callback_query
@@ -579,6 +578,7 @@ def on_statistics_general(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_general_order_select(bot, update, user_data):
     query = update.callback_query
@@ -618,6 +618,7 @@ def on_statistics_general_order_select(bot, update, user_data):
         return state
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_courier_select(bot, update, user_data):
     query = update.callback_query
@@ -652,6 +653,7 @@ def on_statistics_courier_select(bot, update, user_data):
         return state
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_couriers(bot, update, user_data):
     query = update.callback_query
@@ -723,6 +725,7 @@ def on_statistics_couriers(bot, update, user_data):
         return enums.ADMIN_STATISTICS_COURIER_ORDER_SELECT
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_courier_order_select(bot, update, user_data):
     query = update.callback_query
@@ -762,6 +765,7 @@ def on_statistics_courier_order_select(bot, update, user_data):
         return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_locations_select(bot, update, user_data):
     query = update.callback_query
@@ -793,6 +797,7 @@ def on_statistics_locations_select(bot, update, user_data):
         return state
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_locations(bot, update, user_data):
     query = update.callback_query
@@ -853,6 +858,7 @@ def on_statistics_locations(bot, update, user_data):
         return enums.ADMIN_STATISTICS_LOCATIONS
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_locations_order_select(bot, update, user_data):
     query = update.callback_query
@@ -892,6 +898,7 @@ def on_statistics_locations_order_select(bot, update, user_data):
         return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_users(bot, update, user_data):
     query = update.callback_query
@@ -917,6 +924,7 @@ def on_statistics_users(bot, update, user_data):
         return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_user_select(bot, update, user_data):
     query = update.callback_query
@@ -941,6 +949,7 @@ def on_statistics_user_select(bot, update, user_data):
         return state
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_user_select_date(bot, update, user_data):
     query = update.callback_query
@@ -999,6 +1008,7 @@ def on_statistics_user_select_date(bot, update, user_data):
         return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id, page)
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_user_order_select(bot, update, user_data):
     query = update.callback_query
@@ -1039,6 +1049,7 @@ def on_statistics_user_order_select(bot, update, user_data):
         return state
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_statistics_top_clients(bot, update, user_data):
     query = update.callback_query
@@ -1096,6 +1107,7 @@ def on_statistics_top_clients(bot, update, user_data):
         return enums.ADMIN_STATISTICS_TOP_CLIENTS
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_top_users_by_product(bot, update, user_data):
     query = update.callback_query
@@ -1145,6 +1157,7 @@ def on_top_users_by_product(bot, update, user_data):
         return enums.ADMIN_STATISTICS_TOP_CLIENTS
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_top_users_by_location(bot, update, user_data):
     query = update.callback_query
@@ -1201,6 +1214,7 @@ def on_top_users_by_location(bot, update, user_data):
         return enums.ADMIN_STATISTICS_TOP_CLIENTS
 
 
+@user_allowed(AllowedSetting.STATISTICS)
 @user_passes
 def on_top_by_date(bot, update, user_data):
     query = update.callback_query
@@ -1271,7 +1285,7 @@ def on_bot_settings_menu(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if data == 'bot_settings_back':
         msg = _('⚙️ Settings')
-        reply_markup = keyboards.admin_keyboard(_)
+        reply_markup = keyboards.settings_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_MENU
@@ -1299,12 +1313,13 @@ def on_bot_settings_menu(bot, update, user_data):
         return enums.ADMIN_LOTTERY
     elif data == 'bot_settings_channels':
         return states.enter_settings_channels(_, bot, chat_id, msg_id, query.id)
-    elif data == 'bot_settings_order_options':
-        msg = _('💳 Order options')
-        reply_markup = keyboards.order_options_keyboard(_)
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    elif data == 'bot_settings_advertisments':
+        msg = _(' 🍔 Advertisments')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.advertisments_keyboard(_))
         query.answer()
-        return enums.ADMIN_ORDER_OPTIONS
+        return enums.ADMIN_ADVERTISMENTS
+    elif data == 'bot_settings_order_options':
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     elif data == 'bot_settings_language':
         msg = _('🈚️ Default language:')
         reply_markup = keyboards.bot_language_keyboard(_, config.default_language)
@@ -1331,6 +1346,477 @@ def on_bot_settings_menu(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_advertisments(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    if action == 'ads_create':
+        msg = _('Please enter Ad title')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_))
+        query.answer()
+        return enums.ADMIN_CREATE_AD_TITLE
+    elif action == 'ads_edit':
+        msg = _('Please select an Ad:')
+        ads = Ad.select(Ad.title, Ad.id).tuples()
+        user_data['listing_page'] = 1
+        reply_markup = keyboards.general_select_one_keyboard(_, ads)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_ADS_LIST
+    else:
+        return states.enter_settings(_, bot, chat_id, user_id, query.id, msg_id)
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_create_ad_title(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    if query:
+        msg = _(' 🍔 Advertisments')
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=keyboards.advertisments_keyboard(_))
+        query.answer()
+        return enums.ADMIN_ADVERTISMENTS
+    else:
+        text = update.message.text
+        user_data['create_ad'] = {'title': text}
+        msg = _('Please enter Ad text:')
+        bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
+        return enums.ADMIN_CREATE_AD_TEXT
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_create_ad_text(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    if query:
+        msg_id = query.message.message_id
+        if query.data == 'back':
+            msg = _('Please enter Ad title:')
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_))
+            query.answer()
+            return enums.ADMIN_CREATE_AD_TITLE
+        else:
+            msg = _(' 🍔 Advertisments')
+            bot.edit_message_text(msg, chat_id, query.message.message_id,
+                                  reply_markup=keyboards.advertisments_keyboard(_))
+            query.answer()
+            return enums.ADMIN_ADVERTISMENTS
+    else:
+        text = update.message.text
+        user_data['create_ad']['text'] = text
+        msg = _('Please send photo/animation')
+        bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
+        return enums.ADMIN_CREATE_AD_MEDIA
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_create_ad_media(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    if query:
+        msg_id = query.message.message_id
+        if query.data == 'back':
+            msg = _('Please enter Ad text:')
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_))
+            query.answer()
+            return enums.ADMIN_CREATE_AD_TEXT
+        else:
+            msg = _(' 🍔 Advertisments')
+            bot.edit_message_text(msg, chat_id, query.message.message_id,
+                                  reply_markup=keyboards.advertisments_keyboard(_))
+            query.answer()
+            return enums.ADMIN_ADVERTISMENTS
+    else:
+        media_types = ('photo', 'animation')
+        for name in media_types:
+            val = getattr(update.message, name)
+            if val:
+                if type(val) == list:
+                    val = val[-1]
+                val = val.file_id
+                user_data['create_ad']['media'] = val
+                user_data['create_ad']['media_type'] = name
+                break
+        msg = _('Please select channels to send Ad to')
+        channels = Channel.select(Channel.name, Channel.id).tuples()
+        user_data['create_ad']['channels'] = [channel_id for name, channel_id in channels]
+        channels = [(name, channel_id, True) for name, channel_id in channels]
+        reply_markup = keyboards.general_select_keyboard(_, channels)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+        return enums.ADMIN_CREATE_AD_CHANNELS
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_create_ad_channels(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    selected_ids = user_data['create_ad']['channels']
+    if action == 'select':
+        val = int(val)
+        if val in selected_ids:
+            selected_ids.remove(val)
+        else:
+            selected_ids.append(val)
+        msg = _('Please select channels to send Ad to')
+        channels = Channel.select(Channel.name, Channel.id).tuples()
+        channels = [(name, channel_id, channel_id in selected_ids) for name, channel_id in channels]
+        reply_markup = keyboards.general_select_keyboard(_, channels)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_CREATE_AD_CHANNELS
+    else:
+        msg = _('Please enter interval between messages in hours:')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
+        query.answer()
+        return enums.ADMIN_CREATE_AD_INTERVAL
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_create_ad_interval(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    if query:
+        msg_id = query.message.message_id
+        if query.data == 'back':
+            selected_ids = user_data['create_ad']['channels']
+            msg = _('Please select channels to send Ad to')
+            channels = Channel.select(Channel.name, Channel.id).tuples()
+            channels = [(name, channel_id, channel_id in selected_ids) for name, channel_id in channels]
+            reply_markup = keyboards.general_select_keyboard(_, channels)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+            query.answer()
+            return enums.ADMIN_CREATE_AD_CHANNELS
+        else:
+            msg = _(' 🍔 Advertisments')
+            bot.edit_message_text(msg, chat_id, query.message.message_id,
+                                  reply_markup=keyboards.advertisments_keyboard(_))
+            query.answer()
+            return enums.ADMIN_ADVERTISMENTS
+    else:
+        interval = update.message.text
+        try:
+            interval = int(interval)
+        except ValueError:
+            msg = _('Please enter a number')
+            bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
+            return enums.ADMIN_CREATE_AD_INTERVAL
+        ad_data = user_data['create_ad']
+        channels_ids = ad_data.pop('channels')
+        ads_exists = Ad.select().exists()
+        ad = Ad.create(interval=interval, **ad_data)
+        for channel_id in channels_ids:
+            channel = Channel.get(id=channel_id)
+            ChannelAd.create(ad=ad, channel=channel)
+        if not ads_exists:
+            shortcuts.send_channel_advertisments(bot)
+        msg = _('New advertisment has been created!')
+        bot.send_message(chat_id, msg, reply_markup=keyboards.advertisments_keyboard(_))
+        return enums.ADMIN_ADVERTISMENTS
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ads_list(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'page':
+        page = int(val)
+        user_data['listing_page'] = page
+        msg = _('Please select an Ad:')
+        ads = Ad.select(Ad.title, Ad.id).tuples()
+        reply_markup = keyboards.general_select_keyboard(_, ads, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_ADS_LIST
+    elif action == 'select':
+        ad = Ad.get(id=val)
+        title = escape_markdown(ad.title)
+        bot.delete_message(chat_id, msg_id)
+        func = getattr(bot, 'send_{}'.format(ad.media_type))
+        media_msg = func(chat_id, ad.media, caption=ad.text)
+        user_data['ad_detail'] = {'msg_id': media_msg['message_id'], 'ad_id': ad.id}
+        channels = Channel.select().join(ChannelAd, JOIN.LEFT_OUTER).where(ChannelAd.ad == ad).group_by(Channel.id)
+        msg = _('Ad `{}`').format(title)
+        msg += '\n'
+        msg += '〰〰〰〰〰〰〰〰〰〰〰〰️'
+        msg += '\n'
+        msg += _('Channels:')
+        msg += '\n'
+        msg += ', '.join(item.name for item in channels) if channels.exists() else _('No channels')
+        msg += '\n'
+        msg += _('Interval: {} hours').format(ad.interval)
+        bot.send_message(chat_id, msg, reply_markup=keyboards.edit_delete_keyboard(_), parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_AD_SELECTED
+    else:
+        del user_data['listing_page']
+        msg = _(' 🍔 Advertisments')
+        bot.edit_message_text(msg, chat_id, query.message.message_id,
+                              reply_markup=keyboards.advertisments_keyboard(_))
+        query.answer()
+        return enums.ADMIN_ADVERTISMENTS
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_selected(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    ad_data = user_data['ad_detail']
+    bot.delete_message(chat_id, ad_data['msg_id'])
+    if action == 'edit':
+        msg = _('Select option to edit')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.edit_ad_keyboard(_))
+        query.answer()
+        return enums.ADMIN_AD_EDIT
+    elif action in ('delete', 'back'):
+        if action == 'delete':
+            ad = Ad.get(id=ad_data['ad_id'])
+            title = escape_markdown(ad.title)
+            msg = _('Ad `{}` has been deleted.').format(title)
+            ChannelAd.delete().where(ChannelAd.ad == ad).execute()
+            ad.delete_instance()
+        else:
+            msg = _('Please select an Ad:')
+        ads = Ad.select(Ad.title, Ad.id).tuples()
+        reply_markup = keyboards.general_select_one_keyboard(_, ads, user_data['listing_page'])
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_ADS_LIST
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_edit(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    ad = Ad.get(id=user_data['ad_detail']['ad_id'])
+    if action == 'ad_title':
+        title = escape_markdown(ad.title)
+        msg = _('Title: `{}`').format(title)
+        msg += '\n'
+        msg += _('Please enter new title')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_), parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_TITLE
+    elif action == 'ad_text':
+        msg = _('Text: {}').format(ad.text)
+        msg += '\n'
+        msg += _('Please enter new text')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_), parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_TEXT
+    elif action == 'ad_media':
+        msg = _('Please send photo/animation')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_), parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_MEDIA
+    elif action == 'ad_interval':
+        msg = _('Interval: {} hours').format(ad.interval)
+        msg += '\n'
+        msg += _('Please enter new interval')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_),
+                              parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_INTERVAL
+    elif action == 'ad_channels':
+        msg = _('Please select channels to send ad to')
+        channels = Channel.select(Channel.name, Channel.id).tuples()
+        selected_ids = Channel.select().join(ChannelAd, JOIN.LEFT_OUTER).where(ChannelAd.ad == ad)
+        selected_ids = [channel.id for channel in selected_ids]
+        user_data['ad_detail']['channels'] = selected_ids
+        channels = [(name, channel_id, channel_id in selected_ids) for name, channel_id in channels]
+        reply_markup = keyboards.general_select_keyboard(_, channels)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_CHANNELS
+    else:
+        title = escape_markdown(ad.title)
+        bot.delete_message(chat_id, msg_id)
+        func = getattr(bot, 'send_{}'.format(ad.media_type))
+        media_msg = func(chat_id, ad.media, caption=ad.text)
+        user_data['ad_detail'] = {'msg_id': media_msg['message_id'], 'ad_id': ad.id}
+        channels = Channel.select().join(ChannelAd, JOIN.LEFT_OUTER).where(ChannelAd.ad == ad).group_by(Channel.id)
+        msg = _('Ad `{}`').format(title)
+        msg += '\n'
+        msg += '〰〰〰〰〰〰〰〰〰〰〰〰️'
+        msg += '\n'
+        msg += _('Channels:')
+        msg += '\n'
+        msg += ', '.join(item.name for item in channels) if channels.exists() else _('No channels')
+        msg += '\n'
+        msg += _('Interval: {} hours').format(ad.interval)
+        bot.send_message(chat_id, msg, reply_markup=keyboards.edit_delete_keyboard(_),
+                         parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_AD_SELECTED
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_edit_title(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    reply_markup = keyboards.edit_ad_keyboard(_)
+    if query:
+        msg = _('Select option to edit')
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup)
+        query.answer()
+    else:
+        title = update.message.text
+        ad = Ad.get(id=user_data['ad_detail']['ad_id'])
+        ad.title = title
+        ad.save()
+        msg = _('Title has been changed to `{}`').format(title)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    return enums.ADMIN_AD_EDIT
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_edit_text(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    reply_markup = keyboards.edit_ad_keyboard(_)
+    if query:
+        msg = _('Select option to edit')
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup)
+        query.answer()
+    else:
+        text = update.message.text
+        ad = Ad.get(id=user_data['ad_detail']['ad_id'])
+        ad.text = text
+        ad.save()
+        msg = _('Ad text has been changed')
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    return enums.ADMIN_AD_EDIT
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_edit_media(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    reply_markup = keyboards.edit_ad_keyboard(_)
+    if query:
+        msg = _('Select option to edit')
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup)
+        query.answer()
+    else:
+        ad = Ad.get(id=user_data['ad_detail']['ad_id'])
+        media_types = ('photo','animation')
+        for name in media_types:
+            val = getattr(update.message, name)
+            if val:
+                if type(val) == list:
+                    val = val[-1]
+                val = val.file_id
+                ad.media = val
+                ad.media_type = name
+                ad.save()
+                break
+        msg = _('Ad media has been changed')
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    return enums.ADMIN_AD_EDIT
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_edit_interval(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    reply_markup = keyboards.edit_ad_keyboard(_)
+    if query:
+        msg = _('Select option to edit')
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup)
+        query.answer()
+    else:
+        interval = update.message.text
+        try:
+            interval = int(interval)
+        except ValueError:
+            msg = _('Please enter a number (hours)')
+            bot.send_message(chat_id, msg, reply_markup=keyboards.cancel_button(_))
+            return enums.ADMIN_AD_EDIT_INTERVAL
+        ad = Ad.get(id=user_data['ad_detail']['ad_id'])
+        ad.interval = interval
+        ad.save()
+        msg = _('Ad interval has been changed')
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    return enums.ADMIN_AD_EDIT
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_edit_channels(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    selected_ids = user_data['ad_detail']['channels']
+    ad = Ad.get(id=user_data['ad_detail']['ad_id'])
+    if action == 'select':
+        val = int(val)
+        if val in selected_ids:
+            selected_ids.remove(val)
+        else:
+            selected_ids.append(val)
+        msg = _('Please select channels to send Ad to')
+        channels = Channel.select(Channel.name, Channel.id).tuples()
+        channels = [(name, channel_id, channel_id in selected_ids) for name, channel_id in channels]
+        reply_markup = keyboards.general_select_keyboard(_, channels)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_CHANNELS
+    elif action == 'done':
+        ChannelAd.delete().where(ChannelAd.ad == ad).execute()
+        for channel_id in selected_ids:
+            channel = Channel.get(id=channel_id)
+            ChannelAd.create(channel=channel, ad=ad)
+        msg = _('Ad channels has been updated.')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.edit_ad_keyboard(_))
+        return enums.ADMIN_AD_EDIT
+
+
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery(bot, update, user_data):
     query = update.callback_query
@@ -1381,20 +1867,13 @@ def on_lottery(bot, update, user_data):
         msg += '\n'
         msg += ', '.join('@{}'.format(winner.participant.username) for winner in winners)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.lottery_main_settings_keyboard(_))
-        # permissions = LotteryPermission.select().where(LotteryPermission.lottery == lottery)
         permissions = [item.permission for item in lottery.permissions]
-        # if permissions.exists():
-        #     permissions = [item.permission for item in permissions]
-        # else:
-        #     permissions = UserPermission.get_clients_permissions()
         channels_skip = ('service_channel', 'couriers_channel', 'reviews_channel')
         channels = Channel.select().join(ChannelPermissions, JOIN.LEFT_OUTER) \
             .where(ChannelPermissions.permission.in_(permissions), Channel.conf_name.not_in(channels_skip))\
             .group_by(Channel.id)
         _ = get_channel_trans()
-        print(list(channels))
         for channel in channels:
-            print('sending msg to', channel.name)
             msg = messages.create_just_completed_lottery_msg(_, lottery, winners)
             bot.send_message(channel.channel_id, msg, parse_mode=ParseMode.MARKDOWN, timeout=20)
         query.answer()
@@ -1415,6 +1894,7 @@ def on_lottery(bot, update, user_data):
         return states.enter_settings(_, bot, chat_id, user_id, msg_id=msg_id, query_id=query.id)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_winners(bot, update, user_data):
     query = update.callback_query
@@ -1451,6 +1931,8 @@ def on_lottery_winners(bot, update, user_data):
         query.answer()
         return enums.ADMIN_LOTTERY
 
+
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_settings(bot, update, user_data):
     query = update.callback_query
@@ -1475,7 +1957,6 @@ def on_lottery_settings(bot, update, user_data):
             query.answer()
             return enums.ADMIN_LOTTERY_OFF_CONFIRM
         if not lottery.could_activate:
-            print('coud not activate')
             msg = _('Please set all lottery options at first.')
             query.answer(msg, show_alert=True)
             return enums.ADMIN_LOTTERY_SETTINGS
@@ -1523,6 +2004,7 @@ def on_lottery_settings(bot, update, user_data):
         return enums.ADMIN_LOTTERY
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_off_confirm(bot, update, user_data):
     query = update.callback_query
@@ -1545,6 +2027,7 @@ def on_lottery_off_confirm(bot, update, user_data):
     return enums.ADMIN_LOTTERY_SETTINGS
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_winners_num(bot, update, user_data):
     query = update.callback_query
@@ -1569,6 +2052,7 @@ def on_lottery_winners_num(bot, update, user_data):
     return states.enter_lottery_settings(_, bot, chat_id, msg=msg)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_select_product(bot, update, user_data):
     query = update.callback_query
@@ -1601,6 +2085,7 @@ def on_lottery_select_product(bot, update, user_data):
         return states.enter_lottery_settings(_, bot, chat_id, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_amount_select(bot, update, user_data):
     query = update.callback_query
@@ -1627,6 +2112,7 @@ def on_lottery_amount_select(bot, update, user_data):
         return enums.ADMIN_LOTTERY_PRODUCT_SELECT
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_participants(bot, update, user_data):
     query = update.callback_query
@@ -1684,6 +2170,7 @@ def on_lottery_participants(bot, update, user_data):
         return states.enter_lottery_settings(_, bot, chat_id, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_tickets_num(bot, update, user_data):
     query = update.callback_query
@@ -1712,6 +2199,7 @@ def on_lottery_tickets_num(bot, update, user_data):
     return states.enter_lottery_settings_participants(_, bot, chat_id, lottery)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_permissions(bot, update, user_data):
     query = update.callback_query
@@ -1743,6 +2231,7 @@ def on_lottery_permissions(bot, update, user_data):
         return states.enter_lottery_settings_participants(_, bot, chat_id, lottery, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_participants_users(bot, update, user_data):
     query = update.callback_query
@@ -1809,6 +2298,7 @@ def on_lottery_participants_users(bot, update, user_data):
         return states.enter_lottery_settings_participants(_, bot, chat_id, lottery, msg_id, query.id, q_msg)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_conditions(bot, update, user_data):
     query = update.callback_query
@@ -1835,6 +2325,7 @@ def on_lottery_conditions(bot, update, user_data):
         return states.enter_lottery_settings(_, bot, chat_id, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_min_price(bot, update, user_data):
     query = update.callback_query
@@ -1858,6 +2349,7 @@ def on_lottery_min_price(bot, update, user_data):
     return enums.ADMIN_LOTTERY_PRODUCTS_CONDITION
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_products_condition(bot, update, user_data):
     query = update.callback_query
@@ -1897,6 +2389,7 @@ def on_lottery_products_condition(bot, update, user_data):
         return states.enter_lottery_conditions(_, bot, chat_id, lottery, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_single_product_condition(bot, update, user_data):
     query = update.callback_query
@@ -1933,6 +2426,7 @@ def on_lottery_single_product_condition(bot, update, user_data):
         return enums.ADMIN_LOTTERY_PRODUCTS_CONDITION
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_category_condition(bot, update, user_data):
     query = update.callback_query
@@ -1969,6 +2463,7 @@ def on_lottery_category_condition(bot, update, user_data):
         return enums.ADMIN_LOTTERY_PRODUCTS_CONDITION
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_messages(bot, update, user_data):
     query = update.callback_query
@@ -1983,7 +2478,7 @@ def on_lottery_messages(bot, update, user_data):
         config.set_value('lottery_messages', conf_val)
         return states.enter_lottery_messages(_, bot, chat_id, msg_id, query.id)
     elif action == 'lottery_intervals':
-        msg = _('Please enter new interval between messages in minutes:')
+        msg = _('Please enter new interval between messages in hours:')
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_))
         query.answer()
         return enums.ADMIN_LOTTERY_MESSAGES_INTERVAL
@@ -1995,6 +2490,7 @@ def on_lottery_messages(bot, update, user_data):
         return enums.ADMIN_LOTTERY
 
 
+@user_allowed(AllowedSetting.LOTTERY)
 @user_passes
 def on_lottery_messages_interval(bot, update, user_data):
     query = update.callback_query
@@ -2014,6 +2510,7 @@ def on_lottery_messages_interval(bot, update, user_data):
     return states.enter_lottery_messages(_, bot, chat_id)
 
 
+@user_allowed(AllowedSetting.DEFAULT_LANGUAGE)
 @user_passes
 def on_bot_language(bot, update, user_data):
     query = update.callback_query
@@ -2033,6 +2530,7 @@ def on_bot_language(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.COURIERS)
 @user_passes
 def on_couriers(bot, update, user_data):
     query = update.callback_query
@@ -2059,6 +2557,7 @@ def on_couriers(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.COURIERS)
 @user_passes
 def on_courier_detail(bot, update, user_data):
     query = update.callback_query
@@ -2097,6 +2596,7 @@ def on_courier_detail(bot, update, user_data):
         return enums.ADMIN_COURIERS
 
 
+@user_allowed(AllowedSetting.COURIERS)
 @user_passes
 def on_courier_locations(bot, update, user_data):
     query = update.callback_query
@@ -2139,6 +2639,7 @@ def on_courier_locations(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.COURIERS)
 @user_passes
 def on_courier_warehouse_products(bot, update, user_data):
     query = update.callback_query
@@ -2167,6 +2668,7 @@ def on_courier_warehouse_products(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.COURIERS)
 @user_passes
 def on_courier_warehouse_detail(bot, update, user_data):
     query = update.callback_query
@@ -2191,6 +2693,7 @@ def on_courier_warehouse_detail(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.COURIERS)
 @user_passes
 def on_courier_warehouse_edit(bot, update, user_data):
     user_id = get_user_id(update)
@@ -2230,6 +2733,7 @@ def on_courier_warehouse_edit(bot, update, user_data):
     return states.enter_courier_warehouse_detail(_, bot, chat_id, warehouse)
 
 
+@user_allowed(AllowedSetting.BOT_MESSAGES)
 @user_passes
 def on_edit_messages_enter(bot, update, user_data):
     user_id = get_user_id(update)
@@ -2252,6 +2756,7 @@ def on_edit_messages_enter(bot, update, user_data):
     return enums.ADMIN_EDIT_MESSAGES
 
 
+@user_allowed(AllowedSetting.BOT_MESSAGES)
 @user_passes
 def on_edit_messages(bot, update, user_data):
     query = update.callback_query
@@ -2292,6 +2797,7 @@ def on_edit_messages(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_users(bot, update, user_data):
     query = update.callback_query
@@ -2299,23 +2805,31 @@ def on_users(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id, msg_id = query.message.chat_id, query.message.message_id
-    if action in ('users_registered', 'users_pending', 'users_black_list'):
-        if action == 'users_registered':
-            return states.enter_settings_registered_users_perms(_, bot, chat_id, msg_id, query.id)
-        elif action == 'users_pending':
-            user_data['listing_page'] = 1
-            return states.enter_pending_registrations(_, bot, chat_id, msg_id, query.id)
-        else:
-            user_data['listing_page'] = 1
-            return states.enter_black_list(_, bot, chat_id, msg_id, query.id)
-    if action == 'users_back':
+    if action == 'users_registered':
+        return states.enter_settings_registered_users_perms(_, bot, chat_id, msg_id, query.id)
+    elif action == 'users_pending':
+        user_data['listing_page'] = 1
+        return states.enter_pending_registrations(_, bot, chat_id, msg_id, query.id)
+    elif action == 'users_black_list':
+        user_data['listing_page'] = 1
+        return states.enter_black_list(_, bot, chat_id, user_id, msg_id, query.id)
+    elif action == 'users_logistic_managers':
+        msg = _('Please select logistic manager:')
+        lm = UserPermission.get(permission=UserPermission.LOGISTIC_MANAGER)
+        objects = User.select(User.username, User.id).where(User.permission == lm).tuples()
+        user_data['listing_page'] = 1
+        reply_markup = keyboards.general_select_one_keyboard(_, objects)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_LOGISTIC_MANAGERS
+    else:
         msg = _('⚙️ Settings')
-        reply_markup = keyboards.admin_keyboard(_)
+        reply_markup = keyboards.settings_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         return enums.ADMIN_MENU
-    return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_registered_users_perms(bot, update, user_data):
     query = update.callback_query
@@ -2329,10 +2843,11 @@ def on_registered_users_perms(bot, update, user_data):
         user_data['listing_page'] = 1
         return states.enter_settings_registered_users(_, bot, chat_id, perm, msg_id, query.id)
     elif action == 'back':
-        return states.enter_settings_users(_, bot, chat_id, msg_id, query.id)
+        return states.enter_settings_users(_, bot, chat_id, user_id, msg_id, query.id)
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_registered_users(bot, update, user_data):
     query = update.callback_query
@@ -2360,6 +2875,7 @@ def on_registered_users(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_registered_users_select(bot, update, user_data):
     query = update.callback_query
@@ -2380,7 +2896,6 @@ def on_registered_users_select(bot, update, user_data):
         answers_ids = shortcuts.send_user_identification_answers(bot, chat_id, user)
         user_data['user_id_messages'] = answers_ids
         msg = _('User @{}').format(user.username)
-        # msg = _('*Phone number*: {}').format(user.phone_number)
         return states.enter_registered_users_select(_, bot, chat_id, msg, query.id)
     elif action == 'registration_remove':
         msg = _('Remove registration for @{}?').format(user.username)
@@ -2413,6 +2928,7 @@ def on_registered_users_select(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_registered_users_remove(bot, update, user_data):
     query = update.callback_query
@@ -2444,6 +2960,7 @@ def on_registered_users_remove(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_registered_users_status(bot, update, user_data):
     query = update.callback_query
@@ -2459,6 +2976,7 @@ def on_registered_users_status(bot, update, user_data):
             perm = UserPermission.get(id=val)
             user.permission = perm
             user.save()
+            AllowedSetting.delete().where(AllowedSetting.user == user).execute()
             perm_display = perm.get_permission_display()
             user_trans = get_trans(user.telegram_id)
             msg = user_trans('{}, your status has been changed to: {}').format(username, perm_display)
@@ -2473,6 +2991,7 @@ def on_registered_users_status(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_registered_users_black_list(bot, update, user_data):
     query = update.callback_query
@@ -2502,6 +3021,7 @@ def on_registered_users_black_list(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_pending_registrations(bot, update, user_data):
     query = update.callback_query
@@ -2518,10 +3038,11 @@ def on_pending_registrations(bot, update, user_data):
         return states.enter_pending_registrations_user(_, bot, chat_id, msg_id, query.id, user_data, val)
     elif action == 'back':
         del user_data['listing_page']
-        return states.enter_settings_users(_, bot, chat_id, msg_id, query.id)
+        return states.enter_settings_users(_, bot, chat_id, user_id, msg_id, query.id)
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_pending_registrations_user(bot, update, user_data):
     query = update.callback_query
@@ -2562,6 +3083,7 @@ def on_pending_registrations_user(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_pending_registrations_approve(bot, update, user_data):
     query = update.callback_query
@@ -2591,6 +3113,7 @@ def on_pending_registrations_approve(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_pending_registrations_black_list(bot, update, user_data):
     query = update.callback_query
@@ -2620,6 +3143,7 @@ def on_pending_registrations_black_list(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_black_list(bot, update, user_data):
     query = update.callback_query
@@ -2630,7 +3154,7 @@ def on_black_list(bot, update, user_data):
     if action == 'page':
         page = int(val)
         user_data['listing_page'] = page
-        return states.enter_black_list(_, bot, chat_id, msg_id, query.id, page=page)
+        return states.enter_black_list(_, bot, chat_id, user_id, msg_id, query.id, page=page)
     elif action == 'select':
         user_data['user_select'] = val
         user = User.get(id=val)
@@ -2641,10 +3165,11 @@ def on_black_list(bot, update, user_data):
         return enums.ADMIN_BLACK_LIST_USER
     elif action == 'back':
         del user_data['listing_page']
-        return states.enter_settings_users(_, bot, chat_id, msg_id, query.id)
+        return states.enter_settings_users(_, bot, chat_id, user_id, msg_id, query.id)
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.USERS)
 @user_passes
 def on_black_list_user(bot, update, user_data):
     query = update.callback_query
@@ -2681,14 +3206,74 @@ def on_black_list_user(bot, update, user_data):
         del user_data['user_select']
         page = user_data['listing_page']
         msg = _('@{} has been removed from black list!').format(username)
-        return states.enter_black_list(_, bot, chat_id, msg_id, query.id, page=page, msg=msg)
+        return states.enter_black_list(_, bot, chat_id, user_id, msg_id, query.id, page=page, msg=msg)
     elif action == 'black_list_back':
         del user_data['user_select']
         page = user_data['listing_page']
-        return states.enter_black_list(_, bot, chat_id, msg_id, query.id, page=page)
+        return states.enter_black_list(_, bot, chat_id, user_id, msg_id, query.id, page=page)
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_passes
+def on_logistic_managers(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'page':
+        page = int(val)
+        user_data['listing_page'] = page
+        msg = _('Please select logistic manager:')
+        lm = UserPermission.get(permission=UserPermission.LOGISTIC_MANAGER)
+        objects = User.select(User.username, User.id).where(User.permission == lm).tuples()
+        reply_markup = keyboards.general_select_one_keyboard(_, objects, page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_LOGISTIC_MANAGERS
+    elif action == 'select':
+        user_data['logistic_manager_id'] = val
+        user = User.get(id=val)
+        msg = _('Select allowed settings for @{}').format(user.username)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.logistic_manager_settings_keyboard(_, user))
+        query.answer()
+        return enums.ADMIN_LOGISTIC_MANAGER_SETTINGS
+    else:
+        return states.enter_settings_users(_, bot, chat_id, user_id, msg_id, query.id)
+
+
+@user_passes
+def on_logistic_manager_settings(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    if action == 'logistic_back':
+        msg = _('Please select logistic manager:')
+        lm = UserPermission.get(permission=UserPermission.LOGISTIC_MANAGER)
+        objects = User.select(User.username, User.id).where(User.permission == lm).tuples()
+        reply_markup = keyboards.general_select_one_keyboard(_, objects, user_data['listing_page'])
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_LOGISTIC_MANAGERS
+    else:
+        val = action.split('_')[-1]
+        val = int(val)
+        user = User.get(id=user_data['logistic_manager_id'])
+        try:
+            setting = AllowedSetting.get(user=user, setting=val)
+        except AllowedSetting.DoesNotExist:
+            AllowedSetting.create(user=user, setting=val)
+        else:
+            setting.delete_instance()
+        msg = _('Select allowed settings for @{}').format(user.username)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.logistic_manager_settings_keyboard(_, user))
+        query.answer()
+        return enums.ADMIN_LOGISTIC_MANAGER_SETTINGS
+
+
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channels(bot, update, user_data):
     query = update.callback_query
@@ -2722,6 +3307,7 @@ def on_channels(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channels_view(bot, update, user_data):
     query = update.callback_query
@@ -2747,6 +3333,7 @@ def on_channels_view(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channel_details(bot, update, user_data):
     query = update.callback_query
@@ -2782,6 +3369,7 @@ def on_channel_details(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channel_set_name(bot, update, user_data):
     user_id = get_user_id(update)
@@ -2824,6 +3412,7 @@ def on_channel_set_name(bot, update, user_data):
     return enums.ADMIN_CHANNELS_SET_ID
 
 
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channel_set_id(bot, update, user_data):
     user_id = get_user_id(update)
@@ -2867,6 +3456,7 @@ def on_channel_set_id(bot, update, user_data):
     return enums.ADMIN_CHANNELS_SET_LINK
 
 
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channel_set_link(bot, update, user_data):
     user_id = get_user_id(update)
@@ -2918,6 +3508,7 @@ def on_channel_set_link(bot, update, user_data):
     return enums.ADMIN_CHANNELS_ADD
 
 
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channel_add(bot, update, user_data):
     query = update.callback_query
@@ -2977,6 +3568,7 @@ def on_channel_add(bot, update, user_data):
             return states.enter_channel_details(_, bot, chat_id, user_data, channel_id)
 
 
+@user_allowed(AllowedSetting.CHANNELS)
 @user_passes
 def on_channels_language(bot, update, user_data):
     query = update.callback_query
@@ -3041,13 +3633,7 @@ def on_admin_order_options(bot, update, user_data):
                 '*Current discount: {1} > {2}*').format(currency_sym, config.discount, config.discount_min)
         msg += '\n\n'
         msg += _('Currency: {} {}').format(currency_str, currency_sym)
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=msg_id,
-            text=msg,
-            reply_markup=keyboards.cancel_button(_),
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_), parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_ADD_DISCOUNT
     elif data == 'bot_order_options_delivery':
@@ -3098,6 +3684,7 @@ def on_admin_order_options(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ORDERS)
 @user_passes
 def on_admin_orders(bot, update, user_data):
     query = update.callback_query
@@ -3107,7 +3694,7 @@ def on_admin_orders(bot, update, user_data):
     msg_id = query.message.message_id
     action = query.data
     if action == 'back':
-        return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     if action == 'pending':
         orders = Order.select().where(Order.status.in_((Order.CONFIRMED, Order.PROCESSING)))
         orders_data = [(order.id, order.date_created.strftime('%d/%m/%Y')) for order in orders]
@@ -3126,6 +3713,7 @@ def on_admin_orders(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ORDERS)
 @user_passes
 def on_admin_orders_pending_select(bot, update, user_data):
     query = update.callback_query
@@ -3156,20 +3744,13 @@ def on_admin_orders_pending_select(bot, update, user_data):
         msg = service_trans('Order №{}, Location {}\nUser @{}').format(val, location, user_name)
         reply_markup = keyboards.show_order_keyboard(_, order.id)
         shortcuts.send_channel_msg(bot, msg, get_service_channel(), reply_markup, order, parse_mode=None)
-        # orders = Order.select().where(Order.status.in_((Order.CONFIRMED, Order.PROCESSING)))
-        # orders_data = [(order.id, order.date_created.strftime('%d/%m/%Y')) for order in orders]
-        # orders = [(_('Order №{} {}').format(order_id, order_date), order_id) for order_id, order_date in orders_data]
-        # page = user_data['listing_page']
-        # keyboard = keyboards.general_select_one_keyboard(_, orders, page_num=page)
-        # msg = _('Please select an order\nBot will send it to service channel')
-        # bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
-        #                       reply_markup=keyboard)
         query.answer(text=_('Order has been sent to service channel'), show_alert=True)
         return enums.ADMIN_ORDERS_PENDING_SELECT
     else:
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ORDERS)
 @user_passes
 def on_admin_orders_finished_date(bot, update, user_data):
     query = update.callback_query
@@ -3218,6 +3799,7 @@ def on_admin_orders_finished_date(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ORDERS)
 @user_passes
 def on_admin_orders_finished_list(bot, update, user_data):
     query = update.callback_query
@@ -3257,6 +3839,7 @@ def on_admin_orders_finished_list(bot, update, user_data):
         return enums.ADMIN_ORDERS_FINISHED_SELECT
 
 
+@user_allowed(AllowedSetting.ORDERS)
 @user_passes
 def on_admin_orders_finished_select(bot, update, user_data):
     query = update.callback_query
@@ -3289,6 +3872,7 @@ def on_admin_orders_finished_select(bot, update, user_data):
         return enums.ADMIN_ORDERS_FINISHED_SELECT
 
 
+@user_allowed(AllowedSetting.DELIVERY)
 @user_passes
 def on_delivery(bot, update, user_data):
     query = update.callback_query
@@ -3310,6 +3894,7 @@ def on_delivery(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.DELIVERY)
 @user_passes
 def on_delivery_methods(bot, update, user_data):
     query = update.callback_query
@@ -3332,6 +3917,7 @@ def on_delivery_methods(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.DELIVERY)
 @user_passes
 def on_delivery_fee(bot, update, user_data):
     query = update.callback_query
@@ -3350,6 +3936,7 @@ def on_delivery_fee(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.DELIVERY)
 @user_passes
 def on_delivery_fee_add(bot, update, user_data):
     query = update.callback_query
@@ -3369,6 +3956,7 @@ def on_delivery_fee_add(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.DELIVERY)
 @user_passes
 def on_add_delivery_for_location(bot, update, user_data):
     query = update.callback_query
@@ -3389,6 +3977,7 @@ def on_add_delivery_for_location(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.DELIVERY)
 @user_passes
 def on_delivery_fee_enter(bot, update, user_data):
     user_id = get_user_id(update)
@@ -3444,29 +4033,27 @@ def on_delivery_fee_enter(bot, update, user_data):
         return states.enter_delivery_fee_location(_, bot, chat_id, page=page)
 
 
+@user_allowed(AllowedSetting.CATEGORIES)
 @user_passes
 def on_admin_categories(bot, update, user_data):
     query = update.callback_query
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id = query.message.chat_id
-    message_id = query.message.message_id
+    msg_id = query.message.message_id
     action = query.data
     if action == 'add':
         msg = _('Please enter the name of category')
-        bot.edit_message_text(msg, chat_id, message_id, parse_mode=ParseMode.MARKDOWN,
+        bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
                               reply_markup=keyboards.cancel_button(_))
         query.answer()
         return enums.ADMIN_CATEGORY_ADD
     elif action == 'back':
-        bot.edit_message_text(_('💳 Order options'), chat_id, message_id, parse_mode=ParseMode.MARKDOWN,
-                              reply_markup=keyboards.order_options_keyboard(_))
-        query.answer()
-        return enums.ADMIN_ORDER_OPTIONS
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     categories = ProductCategory.select(ProductCategory.title, ProductCategory.id).tuples()
     keyboard = keyboards.general_select_one_keyboard(_, categories)
     msg = _('Please select a category:')
-    bot.edit_message_text(msg, chat_id, message_id,
+    bot.edit_message_text(msg, chat_id, msg_id,
                           parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
     query.answer()
     if action == 'products':
@@ -3475,6 +4062,7 @@ def on_admin_categories(bot, update, user_data):
         return enums.ADMIN_CATEGORY_REMOVE_SELECT
 
 
+@user_allowed(AllowedSetting.CATEGORIES)
 @user_passes
 def on_admin_category_add(bot, update, user_data):
     query = update.callback_query
@@ -3505,6 +4093,7 @@ def on_admin_category_add(bot, update, user_data):
     return enums.ADMIN_CATEGORIES
 
 
+@user_allowed(AllowedSetting.CATEGORIES)
 @user_passes
 def on_admin_category_products_select(bot, update, user_data):
     query = update.callback_query
@@ -3541,6 +4130,7 @@ def on_admin_category_products_select(bot, update, user_data):
         return enums.ADMIN_CATEGORY_PRODUCTS_ADD
 
 
+@user_allowed(AllowedSetting.CATEGORIES)
 @user_passes
 def on_admin_category_remove(bot, update, user_data):
     query = update.callback_query
@@ -3581,6 +4171,7 @@ def on_admin_category_remove(bot, update, user_data):
     return enums.ADMIN_CATEGORIES
 
 
+@user_allowed(AllowedSetting.CATEGORIES)
 @user_passes
 def on_admin_category_products_add(bot, update, user_data):
     query = update.callback_query
@@ -3634,6 +4225,7 @@ def on_admin_category_products_add(bot, update, user_data):
     return enums.ADMIN_CATEGORY_PRODUCTS_ADD
 
 
+@user_allowed(AllowedSetting.WAREHOUSE)
 @user_passes
 def on_warehouse_products(bot, update, user_data):
     query = update.callback_query
@@ -3647,13 +4239,14 @@ def on_warehouse_products(bot, update, user_data):
         return states.enter_warehouse_products(_, bot, chat_id, msg_id, query.id, page)
     elif action == 'back':
         del user_data['listing_page']
-        return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     elif action == 'select':
         user_data['product_warehouse'] = {'product_id': val}
         product = Product.get(id=val)
         return states.enter_warehouse(_, bot, chat_id, product, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.WAREHOUSE)
 @user_passes
 def on_warehouse(bot, update, user_data):
     query = update.callback_query
@@ -3686,6 +4279,7 @@ def on_warehouse(bot, update, user_data):
         return states.enter_warehouse_couriers(_, bot, chat_id, msg_id, query.id, page)
 
 
+@user_allowed(AllowedSetting.WAREHOUSE)
 @user_passes
 def on_warehouse_couriers(bot, update, user_data):
     query = update.callback_query
@@ -3715,6 +4309,7 @@ def on_warehouse_couriers(bot, update, user_data):
         return states.enter_warehouse_courier_detail(_, bot, chat_id, warehouse, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.WAREHOUSE)
 @user_passes
 def on_warehouse_product_credits(bot, update, user_data):
     user_id = get_user_id(update)
@@ -3748,6 +4343,7 @@ def on_warehouse_product_credits(bot, update, user_data):
     return states.enter_warehouse(_, bot, chat_id, product)
 
 
+@user_allowed(AllowedSetting.WAREHOUSE)
 @user_passes
 def on_warehouse_courier_detail(bot, update, user_data):
     query = update.callback_query
@@ -3771,6 +4367,7 @@ def on_warehouse_courier_detail(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.WAREHOUSE)
 @user_passes
 def on_warehouse_courier_edit(bot, update, user_data):
     user_id = get_user_id(update)
@@ -3811,6 +4408,7 @@ def on_warehouse_courier_edit(bot, update, user_data):
     return states.enter_warehouse_courier_detail(_, bot, chat_id, warehouse)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_products(bot, update, user_data):
     query = update.callback_query
@@ -3818,28 +4416,22 @@ def on_products(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     chat_id = query.message.chat_id
-    message_id = query.message.message_id
+    msg_id = query.message.message_id
     if data == 'bot_products_back':
-        bot.edit_message_text(chat_id=chat_id,
-                              message_id=message_id,
-                              text=_('💳 Order options'),
-                              reply_markup=keyboards.order_options_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
-        query.answer()
-        return enums.ADMIN_ORDER_OPTIONS
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     elif data == 'bot_products_view':
         products = Product.select(Product.title, Product.id).where(Product.is_active == True).tuples()
         if not products:
             query.answer(_('You don\'t have products'))
             return enums.ADMIN_PRODUCTS
         msg = _('Select a product to view')
-        bot.edit_message_text(msg, chat_id, message_id, parse_mode=ParseMode.MARKDOWN,
+        bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN,
                               reply_markup=keyboards.general_select_one_keyboard(_, products))
         query.answer()
         return enums.ADMIN_PRODUCTS_SHOW
     elif data == 'bot_products_add':
         bot.edit_message_text(chat_id=chat_id,
-                              message_id=message_id,
+                              message_id=msg_id,
                               text=_('➕ Add product'),
                               reply_markup=keyboards.create_bot_product_add_keyboard(_),
                               parse_mode=ParseMode.MARKDOWN)
@@ -3849,7 +4441,7 @@ def on_products(bot, update, user_data):
         products = Product.select(Product.title, Product.id).where(Product.is_active==True).tuples()
         products_keyboard = keyboards.general_select_one_keyboard(_, products)
         msg = _('Select a product to edit')
-        bot.edit_message_text(msg, chat_id, message_id, parse_mode=ParseMode.MARKDOWN, reply_markup=products_keyboard)
+        bot.edit_message_text(msg, chat_id, msg_id, parse_mode=ParseMode.MARKDOWN, reply_markup=products_keyboard)
         query.answer()
         return enums.ADMIN_PRODUCT_EDIT_SELECT
     elif data == 'bot_products_remove':
@@ -3861,7 +4453,7 @@ def on_products(bot, update, user_data):
         user_data['products_remove'] = {'ids': [], 'page': 1}
         products = [(product.title, product.id, False) for product in products]
         products_keyboard = keyboards.general_select_keyboard(_, products)
-        bot.edit_message_text(chat_id=chat_id, message_id=message_id,
+        bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
                               text=_('Select a product which you want to remove'),
                               reply_markup=products_keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
@@ -3870,6 +4462,7 @@ def on_products(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_show_product(bot, update, user_data):
     query = update.callback_query
@@ -3896,7 +4489,6 @@ def on_show_product(bot, update, user_data):
         bot.delete_message(chat_id, msg_id)
         shortcuts.send_product_media(bot, product, chat_id)
         msg = messages.create_admin_product_description(_, product)
-        # bot.send_message(chat_id, msg)
         msg += _('Select a product to view')
         bot.send_message(chat_id, msg, parse_mode=ParseMode.MARKDOWN,
                          reply_markup=keyboards.general_select_one_keyboard(_, products))
@@ -3904,6 +4496,7 @@ def on_show_product(bot, update, user_data):
     return enums.ADMIN_PRODUCTS_SHOW
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_edit_select(bot, update, user_data):
     query = update.callback_query
@@ -3941,6 +4534,7 @@ def on_product_edit_select(bot, update, user_data):
         return enums.ADMIN_PRODUCT_EDIT
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_edit(bot, update, user_data):
     query = update.callback_query
@@ -3982,6 +4576,7 @@ def on_product_edit(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_edit_title(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4010,6 +4605,7 @@ def on_product_edit_title(bot, update, user_data):
         return enums.ADMIN_PRODUCT_EDIT
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_edit_price_type(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4059,6 +4655,7 @@ def on_product_edit_price_type(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_edit_prices_group(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4091,43 +4688,23 @@ def on_product_edit_prices_group(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_EDIT_PRICES_GROUP
-        # product_id = user_data['admin_product_edit'['id']
-        # product = Product.get(id=product_id)
-        # price_group = GroupProductCount.get(id=val)
-        # product.group_price = price_group
-        # product.save()
-        # product_counts = product.product_counts
-        # if product_counts:
-        #     for p_count in product_counts:
-        #         p_count.delete_instance()
-        # msg = _('Product\'s price group was updated!')
-        # keyboard = keyboards.create_bot_product_edit_keyboard(_)
-        # bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-        # return enums.ADMIN_PRODUCT_EDIT
     else:
-        product_id = user_data['admin_product_edit']['id']
-        product = Product.get(id=product_id)
-        ProductCount.delete().where(ProductCount.product == product).execute()
-        price_groups = GroupProductCount.select().where(GroupProductCount.id.in_(selected_ids))
-        ProductGroupCount.delete().where(ProductGroupCount.product == product).execute()
-        for price_group in price_groups:
-            ProductGroupCount.create(product=product, price_group=price_group)
+        if selected_ids:
+            product_id = user_data['admin_product_edit']['id']
+            product = Product.get(id=product_id)
+            ProductCount.delete().where(ProductCount.product == product).execute()
+            price_groups = GroupProductCount.select().where(GroupProductCount.id.in_(selected_ids))
+            ProductGroupCount.delete().where(ProductGroupCount.product == product).execute()
+            for price_group in price_groups:
+                ProductGroupCount.create(product=product, price_group=price_group)
         msg = _('Product\'s price groups was updated!')
         keyboard = keyboards.create_bot_product_edit_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_PRODUCT_EDIT
-    # elif action == 'back':
-    #     product_id = user_data['admin_product_edit']['id']
-    #     product = Product.get(id=product_id)
-    #     prices_str = shortcuts.get_product_prices_str(_, product)
-    #     keyboard = keyboards.create_product_price_type_keyboard(_)
-    #     bot.edit_message_text(prices_str, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    #     query.answer()
-    #     return enums.ADMIN_PRODUCT_EDIT_PRICES
-    # else:
-    #     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
+@user_passes
 def on_product_edit_prices_text(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
@@ -4169,6 +4746,7 @@ def on_product_edit_prices_text(bot, update, user_data):
         return enums.ADMIN_PRODUCT_EDIT
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_edit_media(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4217,6 +4795,7 @@ def on_product_edit_media(bot, update, user_data):
     return enums.ADMIN_PRODUCT_EDIT_MEDIA
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_delete_product(bot, update, user_data):
     query = update.callback_query
@@ -4269,6 +4848,7 @@ def on_delete_product(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_add(bot, update, user_data):
     query = update.callback_query
@@ -4307,6 +4887,7 @@ def on_product_add(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_last_select(bot, update, user_data):
     query = update.callback_query
@@ -4358,6 +4939,7 @@ def on_product_last_select(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_title(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4386,6 +4968,7 @@ def on_product_title(bot, update, user_data):
     return enums.ADMIN_ADD_PRODUCT_PRICES
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_add_product_prices(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4421,6 +5004,7 @@ def on_add_product_prices(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_price_group(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4454,29 +5038,21 @@ def on_product_price_group(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_PRICES_GROUP
-        # user_data['add_product']['prices'] = {'group_id': val}
-        # msg = _('Send photos/videos for new product')
-        # keyboard = keyboards.create_product_media_keyboard(_)
-        # bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-        # query.answer()
-        # return enums.ADMIN_PRODUCT_MEDIA
     else:
-        # user_data['add_product']['prices'] = {'group_id': val}
+        print(selected_ids)
+        if not selected_ids:
+            msg = _('Add product prices:')
+            keyboard = keyboards.create_product_price_type_keyboard(_)
+            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboard)
+            return enums.ADMIN_ADD_PRODUCT_PRICES
         msg = _('Send photos/videos for new product')
         keyboard = keyboards.create_product_media_keyboard(_)
         bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_PRODUCT_MEDIA
-    # elif action == 'back':
-    #     msg = _('Add product prices:')
-    #     keyboard = keyboards.create_product_price_type_keyboard(_)
-    #     bot.send_message(update.effective_chat.id, msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    #     query.answer()
-    #     return enums.ADMIN_ADD_PRODUCT_PRICES
-    # else:
-    #     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_price_text(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4492,7 +5068,6 @@ def on_product_price_text(bot, update, user_data):
             return enums.ADMIN_ADD_PRODUCT_PRICES
         else:
             return states.enter_unknown_command(_, bot, query)
-    # check that prices are valid
     prices = update.message.text
     prices_list = []
     for line in prices.split('\n'):
@@ -4513,6 +5088,7 @@ def on_product_price_text(bot, update, user_data):
     return enums.ADMIN_PRODUCT_MEDIA
 
 
+@user_allowed(AllowedSetting.MY_PRODUCTS)
 @user_passes
 def on_product_media(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4580,6 +5156,7 @@ def on_product_media(bot, update, user_data):
     return enums.ADMIN_PRODUCT_MEDIA
 
 
+@user_allowed(AllowedSetting.LOCATIONS)
 @user_passes
 def on_locations(bot, update, user_data):
     query = update.callback_query
@@ -4588,7 +5165,7 @@ def on_locations(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action = query.data
     if action == 'bot_locations_back':
-        return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     elif action == 'bot_locations_view':
         page = 1
         user_data['listing_page'] = page
@@ -4602,6 +5179,7 @@ def on_locations(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.LOCATIONS)
 @user_passes
 def on_locations_view(bot, update, user_data):
     query = update.callback_query
@@ -4635,6 +5213,7 @@ def on_locations_view(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.LOCATIONS)
 @user_passes
 def on_location_detail(bot, update, user_data):
     query = update.callback_query
@@ -4657,6 +5236,7 @@ def on_location_detail(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.LOCATIONS)
 @user_passes
 def on_location_add(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4705,6 +5285,7 @@ def on_admin_fallback(bot, update):
     return enums.ADMIN_INIT
 
 
+@user_allowed(AllowedSetting.WORKING_HOURS)
 @user_passes
 def on_admin_edit_working_hours(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4726,6 +5307,7 @@ def on_admin_edit_working_hours(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.WORKING_HOURS)
 @user_passes
 def on_admin_enter_working_hours(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4775,6 +5357,7 @@ def on_admin_enter_working_hours(bot, update, user_data):
     return states.enter_working_days(_, bot, chat_id, msg=msg)
 
 
+@user_allowed(AllowedSetting.DISCOUNT)
 @user_passes
 def on_admin_add_discount(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4783,7 +5366,7 @@ def on_admin_add_discount(bot, update, user_data):
     chat_id = update.effective_chat.id
     if query:
         if query.data == 'back':
-            return states.enter_order_options(_, bot, chat_id, query.message.message_id, query.id)
+            return states.enter_order_options(_, bot, chat_id, user_id, query.message.message_id, query.id)
         else:
             return states.enter_unknown_command(_, bot, query)
     discount = update.message.text
@@ -4793,7 +5376,7 @@ def on_admin_add_discount(bot, update, user_data):
         config.set_value('discount', discount)
         config.set_value('discount_min', discount_min)
         msg = _('Discount was changed')
-        return states.enter_order_options(_, bot, chat_id, msg=msg)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg=msg)
     else:
         msg = _('Invalid format')
         msg += '\n'
@@ -4808,6 +5391,7 @@ def on_admin_add_discount(bot, update, user_data):
         return enums.ADMIN_ADD_DISCOUNT
 
 
+@user_allowed(AllowedSetting.BOT_STATUS)
 @user_passes
 def on_admin_bot_status(bot, update, user_data):
     query = update.callback_query
@@ -4842,6 +5426,7 @@ def on_admin_bot_status(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ID_PROCESS)
 @user_passes
 def on_admin_edit_identification_stages(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4850,11 +5435,7 @@ def on_admin_edit_identification_stages(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action, data = query.data.split('|')
     if action == 'id_back':
-        msg = _('💳 Order options')
-        bot.edit_message_text(msg, chat_id, msg_id,
-                              reply_markup=keyboards.order_options_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
-        return enums.ADMIN_ORDER_OPTIONS
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     if action in ('id_toggle', 'id_delete', 'id_order_toggle'):
         stage = IdentificationStage.get(id=data)
         question = IdentificationQuestion.get(stage=stage)
@@ -4877,11 +5458,7 @@ def on_admin_edit_identification_stages(bot, update, user_data):
                               parse_mode=ParseMode.MARKDOWN)
         return enums.ADMIN_EDIT_IDENTIFICATION_STAGES
     if action == 'id_permissions':
-        all_permissions = [
-            UserPermission.AUTHORIZED_RESELLER, UserPermission.FRIEND,
-            UserPermission.FAMILY, UserPermission.VIP_CLIENT, UserPermission.CLIENT
-        ]
-        all_permissions = UserPermission.select().where(UserPermission.permission.in_(all_permissions))
+        all_permissions = UserPermission.get_clients_permissions()
         stage = IdentificationStage.get(id=data)
         permissions = IdentificationPermission.select().where(IdentificationPermission.stage == stage)
         permissions = [perm.permission for perm in permissions]
@@ -4916,6 +5493,7 @@ def on_admin_edit_identification_stages(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ID_PROCESS)
 @user_passes
 def on_admin_edit_identification_permissions(bot, update, user_data):
     user_id = get_user_id(update)
@@ -4925,11 +5503,7 @@ def on_admin_edit_identification_permissions(bot, update, user_data):
     action, val = query.data.split('|')
     selected_ids = user_data['admin_edit_identification']['selected_ids']
     if action == 'select':
-        all_permissions = [
-            UserPermission.AUTHORIZED_RESELLER, UserPermission.FRIEND,
-            UserPermission.FAMILY, UserPermission.VIP_CLIENT, UserPermission.CLIENT
-        ]
-        all_permissions = UserPermission.select().where(UserPermission.permission.in_(all_permissions))
+        all_permissions = UserPermission.get_clients_permissions()
         val = int(val)
         if val in selected_ids:
             selected_ids.remove(val)
@@ -4965,6 +5539,7 @@ def on_admin_edit_identification_permissions(bot, update, user_data):
         return enums.ADMIN_EDIT_IDENTIFICATION_STAGES
 
 
+@user_allowed(AllowedSetting.ID_PROCESS)
 @user_passes
 def on_admin_edit_identification_question_type(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5016,6 +5591,7 @@ def on_admin_edit_identification_question_type(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.ID_PROCESS)
 @user_passes
 def on_admin_edit_identification_text_type(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5074,6 +5650,7 @@ def on_admin_edit_identification_text_type(bot, update, user_data):
         return enums.ADMIN_EDIT_IDENTIFICATION_STAGES
 
 
+@user_allowed(AllowedSetting.ID_PROCESS)
 @user_passes
 def on_admin_edit_identification_question(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5164,6 +5741,7 @@ def on_admin_reset_confirm(bot, update, user_data):
     return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_groups(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5182,11 +5760,12 @@ def on_admin_product_price_groups(bot, update, user_data):
         user_data['listing_page'] = 1
         return states.enter_price_groups_list(_, bot, chat_id, msg_id, query.id)
     elif action == 'back':
-        return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     else:
         states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_groups_list(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5210,6 +5789,7 @@ def on_admin_product_price_groups_list(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_group_selected(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5293,6 +5873,7 @@ def on_admin_product_price_group_selected(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_group_clients(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5332,6 +5913,7 @@ def on_admin_product_price_group_clients(bot, update, user_data):
         return states.enter_unknown_command(_, bot, query)
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_group_clients_users(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5381,6 +5963,7 @@ def on_admin_product_price_group_clients_users(bot, update, user_data):
         return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_group_change(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5403,6 +5986,7 @@ def on_admin_product_price_group_change(bot, update, user_data):
     return enums.ADMIN_PRODUCT_PRICE_GROUP_PRICES
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_group_prices(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5472,6 +6056,7 @@ def on_admin_product_price_group_prices(bot, update, user_data):
         return enums.ADMIN_PRODUCT_PRICE_GROUP_PERMISSIONS_NEW
 
 
+@user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
 def on_admin_product_price_group_permissions_new(bot, update, user_data):
     user_id = get_user_id(update)
@@ -5481,11 +6066,7 @@ def on_admin_product_price_group_permissions_new(bot, update, user_data):
     action, val = query.data.split('|')
     if action == 'select':
         msg = _('Please select special clients for group')
-        permissions = [
-            UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
-            UserPermission.VIP_CLIENT, UserPermission.CLIENT
-        ]
-        permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+        permissions = UserPermission.get_clients_permissions()
         selected_ids = user_data['price_group']['selected_perms_ids']
         val = int(val)
         if val in selected_ids:
@@ -5542,7 +6123,7 @@ def on_admin_btc_settings(bot, update, user_data):
         query.answer()
         return enums.ADMIN_BTC_NEW_PASSWORD
     if action == 'btc_back':
-        return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     if action == 'btc_disable':
         btc_creds.enabled = False
         btc_creds.save()
@@ -5671,7 +6252,7 @@ def on_admin_change_currency(bot, update, user_data):
         query.answer()
         return enums.ADMIN_SET_CURRENCIES_CONFIRM
     elif data == 'back':
-        return states.enter_order_options(_, bot, chat_id, msg_id, query.id)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     else:
         return states.enter_unknown_command(_, bot, query)
 
@@ -5694,7 +6275,7 @@ def on_admin_change_currency_confirm(bot, update, user_data):
                 new_price = converter.convert_currencies(price, old_currency, currency)
                 product_count.price = new_price
                 product_count.save()
-            for location in Location.select():
+            for location in Location.select().where(Location.delivery_fee.is_null(False)):
                 delivery_fee = converter.convert_currencies(location.delivery_fee, old_currency, currency)
                 delivery_min = converter.convert_currencies(location.delivery_min, old_currency, currency)
                 location.delivery_min = delivery_min

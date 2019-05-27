@@ -1,10 +1,7 @@
-from telegram import ParseMode
-from telegram.utils.helpers import escape_markdown
-
 from .decorators import user_passes
-from .helpers import logger, config, get_channel_trans, get_trans, get_user_id, get_service_channel
-from .models import Order, User, OrderBtcPayment, CourierChatMessage, CourierChat
-from . import shortcuts, enums, keyboards, messages, states
+from .helpers import get_channel_trans, get_trans, get_user_id, get_service_channel
+from .models import Order, User, CourierChatMessage, CourierChat
+from . import shortcuts, enums, keyboards, states
 
 
 @user_passes
@@ -310,7 +307,6 @@ def on_drop_order(bot, update, user_data):
         bot.delete_message(chat_id, msg_id)
         query.answer()
         return enums.COURIER_STATE_INIT
-        # return states.enter_courier_main_menu(_, bot, chat_id, user, order, msg_id, query.id)
 
 
 @user_passes
@@ -360,12 +356,10 @@ def on_courier_confirm_order(bot, update, user_data):
         bot.send_message(user.telegram_id, msg, reply_markup=reply_markup)
         query.answer()
         return enums.BOT_INIT
-        # return states.enter_menu(bot, update, user_data)
     elif action == 'no':
         bot.delete_message(chat_id, msg_id)
         query.answer()
         return enums.COURIER_STATE_INIT
-        # return states.enter_courier_main_menu(_, bot, chat_id, user, order, msg_id, query.id)
 
 
 @user_passes
@@ -384,8 +378,6 @@ def on_courier_confirm_report(bot, update, user_data):
         bot.delete_message(chat_id, msg_id)
         query.answer()
         return enums.COURIER_STATE_INIT
-        # user = User.get(telegram_id=user_id)
-        # return states.enter_courier_main_menu(_, bot, chat_id, user, order, msg_id, query.id)
 
 
 @user_passes
@@ -436,8 +428,6 @@ def on_courier_ping_client(bot, update, user_data):
         query.answer(msg, show_alert=True)
         bot.delete_message(chat_id, msg_id)
         return enums.COURIER_STATE_INIT
-        #bot.edit_message_text(msg, chat_id, msg_id)
-        # return states.enter_courier_main_menu(_, bot, chat_id, user, order, query.id)
     if action == 'back':
         bot.delete_message(chat_id, msg_id)
         query.answer()

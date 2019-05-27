@@ -20,10 +20,7 @@ def start_orders_processing(bot):
                 ))
     for o in orders:
         set_btc_proc(o.id)
-        print(o.id)
         btc_data = OrderBtcPayment.get(order=o)
-        print(btc_data.id)
-        print('\n')
         process_btc_payment(bot, o)
 
 

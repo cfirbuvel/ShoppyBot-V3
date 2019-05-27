@@ -3,10 +3,10 @@ import os
 from functools import wraps
 
 from telegram.ext import ConversationHandler
-# from .enums import BOT_INIT
 from .keyboards import start_btn
-from .helpers import get_user_id, get_locale, config, cat, get_username
-from .models import User, UserPermission
+from .helpers import get_user_id, get_locale, config, cat, get_username, get_trans
+from .models import User, UserPermission, AllowedSetting
+from .states import enter_menu
 
 
 def user_passes(func):
@@ -29,7 +29,8 @@ def user_passes(func):
             if username != user.username:
                 user.username = username
                 user.save()
-        _ = gettext.gettext if locale == 'en' else cat.gettext
+        # _ = gettext.gettext if locale == 'en' else cat.gettext
+        _ = get_trans(user_id)
         query = update.callback_query
         if query:
             bot.answer_callback_query(query.id)
@@ -62,5 +63,29 @@ def user_passes(func):
     return wrapper
 
 
-def user_permissions():
-    pass
+def user_allowed(setting):
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(bot, update, user_data):
+            user_id = get_user_id(update)
+            user = User.get(telegram_id=user_id)
+            if user.is_logistic_manager:
+                try:
+                    AllowedSetting.get(user=user, setting=setting)
+                except AllowedSetting.DoesNotExist:
+                    _ = get_trans(user_id)
+                    msg = _('You don\'t have permission to use this menu')
+                    query = update.query
+                    chat_id = update.effective_chat.id
+                    if query:
+                        bot.edit_message_text(msg, chat_id, query.message.message_id)
+                        query_id = query.id
+                    else:
+                        bot.send_message(chat_id, msg)
+                        query_id = None
+                    return enter_menu(bot, update, user_data, query_id=query_id)
+            return func(bot, update, user_data)
+        return wrapper
+
+    return decorator

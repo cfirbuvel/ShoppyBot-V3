@@ -182,9 +182,6 @@ def wallet_enable_hd(trans, wallet_id, password, second_password=None):
 
 class CurrencyConverter:
 
-    # def __init__(self):
-    #     self.api_key = config.config.get(config.section, 'currencies_api_key')
-
     @staticmethod
     def convert_to_btc(currency, value):
         res = None
