@@ -734,25 +734,19 @@ def order_options_keyboard(_):
 def logistic_manager_order_options_keyboard(_, allowed):
     buttons = []
     buttons_map = [
-        (AllowedSetting.ORDERS, InlineKeyboardButton(_('📖 Orders'), callback_data='bot_order_options_orders')),
-        (AllowedSetting.MY_PRODUCTS, InlineKeyboardButton(_('🏪 My Products'), callback_data='bot_order_options_product')),
-        (AllowedSetting.CATEGORIES, InlineKeyboardButton(_('🛍 Categories'), callback_data='bot_order_options_categories')),
-        (AllowedSetting.WAREHOUSE, InlineKeyboardButton(_('🏗 Warehouse'), callback_data='bot_order_options_warehouse')),
-        (AllowedSetting.DISCOUNT, InlineKeyboardButton(_('💲 Add discount'), callback_data='bot_order_options_discount')),
-        (AllowedSetting.DELIVERY, InlineKeyboardButton(_('🚕 Delivery'), callback_data='bot_order_options_delivery')),
-        (AllowedSetting.PRICE_GROUPS, InlineKeyboardButton(_('💸 Product price groups'), callback_data='bot_order_options_price_groups')),
-        (AllowedSetting.LOCATIONS, InlineKeyboardButton(_('🎯 Locations'), callback_data='bot_order_options_add_locations')),
-        (AllowedSetting.ID_PROCESS, InlineKeyboardButton(_('👨 Edit identification process'), callback_data='bot_order_options_identify'))
+        (AllowedSetting.ORDERS, [InlineKeyboardButton(_('📖 Orders'), callback_data='bot_order_options_orders')]),
+        (AllowedSetting.MY_PRODUCTS, [InlineKeyboardButton(_('🏪 My Products'), callback_data='bot_order_options_product')]),
+        (AllowedSetting.CATEGORIES, [InlineKeyboardButton(_('🛍 Categories'), callback_data='bot_order_options_categories')]),
+        (AllowedSetting.WAREHOUSE, [InlineKeyboardButton(_('🏗 Warehouse'), callback_data='bot_order_options_warehouse')]),
+        (AllowedSetting.DISCOUNT, [InlineKeyboardButton(_('💲 Add discount'), callback_data='bot_order_options_discount')]),
+        (AllowedSetting.DELIVERY, [InlineKeyboardButton(_('🚕 Delivery'), callback_data='bot_order_options_delivery')]),
+        (AllowedSetting.PRICE_GROUPS, [InlineKeyboardButton(_('💸 Product price groups'), callback_data='bot_order_options_price_groups')]),
+        (AllowedSetting.LOCATIONS, [InlineKeyboardButton(_('🎯 Locations'), callback_data='bot_order_options_add_locations')]),
+        (AllowedSetting.ID_PROCESS, [InlineKeyboardButton(_('👨 Edit identification process'), callback_data='bot_order_options_identify')])
     ]
-    btn_group = []
     for setting, btn in buttons_map:
         if setting in allowed:
-            btn_group.append(btn)
-            if len(btn_group) == 2:
-                buttons.append(btn_group)
-                btn_group = []
-    if btn_group:
-        buttons.append(btn_group)
+            buttons.append(btn)
     buttons.append([InlineKeyboardButton(_('↩ Back'), callback_data='bot_order_options_back')])
     return InlineKeyboardMarkup(buttons)
 

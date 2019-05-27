@@ -76,7 +76,7 @@ def user_allowed(setting):
                 except AllowedSetting.DoesNotExist:
                     _ = get_trans(user_id)
                     msg = _('You don\'t have permission to use this menu')
-                    query = update.query
+                    query = update.callback_query
                     chat_id = update.effective_chat.id
                     if query:
                         bot.edit_message_text(msg, chat_id, query.message.message_id)

@@ -109,7 +109,7 @@ def enter_settings(_, bot, chat_id, user_id, query_id=None, msg_id=None, msg=Non
         msg = _('⚙ Bot settings')
     user = User.get(telegram_id=user_id)
     if user.is_logistic_manager:
-        reply_markup = keyboards.bot_settings_logistic_manager_keyboard(_, user.allowed_settings)
+        reply_markup = keyboards.bot_settings_logistic_manager_keyboard(_, user.allowed_settings_list)
     else:
         reply_markup = keyboards.bot_settings_keyboard(_)
     if msg_id:
@@ -227,7 +227,7 @@ def enter_order_options(_, bot, chat_id, user_id, msg_id=None, query_id=None, ms
         msg = _('💳 Order options')
     user = User.get(telegram_id=user_id)
     if user.is_logistic_manager:
-        reply_markup = keyboards.logistic_manager_order_options_keyboard(_, user.allowed_settings)
+        reply_markup = keyboards.logistic_manager_order_options_keyboard(_, user.allowed_settings_list)
     else:
         reply_markup = keyboards.order_options_keyboard(_)
     if msg_id:

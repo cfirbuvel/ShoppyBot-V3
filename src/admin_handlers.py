@@ -77,7 +77,15 @@ def on_reviews(bot, update, user_data):
         query.answer()
         return enums.ADMIN_REVIEWS_QUESTIONS
     else:
-        return states.enter_settings(_, bot, chat_id, user_id, query_id=query.id, msg_id=msg_id)
+        user = User.get(telegram_id=user_id)
+        msg = _('⚙️ Settings')
+        if user.is_logistic_manager:
+            reply_markup = keyboards.settings_logistic_manager_keyboard(_, user.allowed_settings_list)
+        else:
+            reply_markup = keyboards.settings_keyboard(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        return enums.ADMIN_MENU
+        # return states.enter_settings(_, bot, chat_id, user_id, query_id=query.id, msg_id=msg_id)
 
 
 @user_allowed(AllowedSetting.REVIEWS)
@@ -475,11 +483,12 @@ def on_statistics_menu(bot, update, user_data):
     _ = get_trans(user_id)
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if action == 'back':
-        bot.edit_message_text(chat_id=chat_id,
-                              message_id=msg_id,
-                              text=_('⚙️ Settings'),
-                              reply_markup=keyboards.settings_keyboard(_),
-                              parse_mode=ParseMode.MARKDOWN)
+        user = User.get(telegram_id=user_id)
+        if user.is_logistic_manager:
+            reply_markup = keyboards.settings_logistic_manager_keyboard(_, user.allowed_settings_list)
+        else:
+            reply_markup = keyboards.settings_keyboard(_)
+        bot.edit_message_text(_('⚙️ Settings'), chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_MENU
     elif action == 'stats_general':
@@ -1285,7 +1294,11 @@ def on_bot_settings_menu(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     if data == 'bot_settings_back':
         msg = _('⚙️ Settings')
-        reply_markup = keyboards.settings_keyboard(_)
+        user = User.get(telegram_id=user_id)
+        if user.is_logistic_manager:
+            reply_markup = keyboards.settings_logistic_manager_keyboard(_, user.allowed_settings_list)
+        else:
+            reply_markup = keyboards.settings_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         query.answer()
         return enums.ADMIN_MENU
@@ -2824,7 +2837,11 @@ def on_users(bot, update, user_data):
         return enums.ADMIN_LOGISTIC_MANAGERS
     else:
         msg = _('⚙️ Settings')
-        reply_markup = keyboards.settings_keyboard(_)
+        user = User.get(telegram_id=user_id)
+        if user.is_logistic_manager:
+            reply_markup = keyboards.settings_logistic_manager_keyboard(_, user.allowed_settings_list)
+        else:
+            reply_markup = keyboards.settings_keyboard(_)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         return enums.ADMIN_MENU
 

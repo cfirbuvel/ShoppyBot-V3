@@ -230,7 +230,7 @@ def on_menu(bot, update, user_data):
         elif data == 'menu_settings':
             msg = _('⚙️ Settings')
             if user.is_logistic_manager:
-                reply_markup = keyboards.settings_logistic_manager_keyboard(_, user.allowed_settings)
+                reply_markup = keyboards.settings_logistic_manager_keyboard(_, user.allowed_settings_list)
             else:
                 reply_markup = keyboards.settings_keyboard(_)
             bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)

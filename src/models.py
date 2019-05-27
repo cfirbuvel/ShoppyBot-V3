@@ -140,6 +140,10 @@ class User(BaseModel):
     def is_courier(self):
         return self.permission.permission == UserPermission.COURIER
 
+    @property
+    def allowed_settings_list(self):
+        return [item.setting for item in self.allowed_settings]
+
 
 class AllowedSetting(BaseModel):
     COURIERS = 1
