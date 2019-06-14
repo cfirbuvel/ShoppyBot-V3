@@ -12,6 +12,7 @@ from collections import defaultdict
 from decimal import Decimal
 
 import redis
+from pytz import timezone
 
 from telegram import TelegramError
 
@@ -105,6 +106,8 @@ class ConfigHelper:
         if value:
             format = '%Y-%m-%d %H-%M-%S'
             value = datetime.datetime.strptime(value, format)
+            if timezone:
+                value = timezone('Asia/Jerusalem').localize(value)
             return value
 
     def set_datetime_value(self, name, value):
@@ -203,9 +206,9 @@ class ConfigHelper:
     def delivery_method(self):
         return self.get_config_value('delivery_method')
 
-    @property
-    def delivery_fee_for_vip(self):
-        return self.get_config_value('delivery_fee_for_vip', boolean=True)
+    # @property
+    # def delivery_fee_for_vip(self):
+    #     return self.get_config_value('delivery_fee_for_vip', boolean=True)
 
     @property
     def delivery_fee(self):
@@ -332,7 +335,7 @@ def get_user_id(update):
     return user_id
 
 
-def get_trans(user_id):
+def  get_trans(user_id):
     user = User.get(telegram_id=user_id)
     locale = user.locale
     return gettext.gettext if locale == 'en' else cat.gettext

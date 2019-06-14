@@ -4,6 +4,7 @@ import random
 import operator
 import time
 from peewee import JOIN
+from pytz import timezone
 
 from telegram import ParseMode, TelegramError, InputMediaPhoto, InputMediaVideo
 from telegram.utils.helpers import escape_markdown, escape
@@ -17,7 +18,7 @@ from .cart_helper import Cart
 from .models import Order, ProductWarehouse, ChannelMessageData, ProductCount, UserPermission, UserIdentificationAnswer, \
     Product, WorkingHours, User, CurrencyRates, BitcoinCredentials, Channel, ChannelPermissions, CourierChatMessage, \
     CourierChat, GroupProductCount, GroupProductCountPermission, ProductGroupCount, UserGroupCount, Lottery, \
-    LotteryParticipant, LotteryPermission, Ad, ChannelAd
+    LotteryParticipant, LotteryPermission, Ad, ChannelAd, UserAd
 from . import keyboards, messages
 
 
@@ -111,7 +112,9 @@ def send_user_identification_answers(bot, chat_id, user):
 
 
 def initialize_calendar(_, bot, user_data, chat_id, state, message_id=None, query_id=None, msg=None, cancel=False):
-    current_date = datetime.date.today()
+    current_date = datetime.datetime.now()
+    il_tz = timezone('Asia/Jerusalem')
+    current_date = il_tz.localize(current_date)
     year, month = current_date.year, current_date.month
     try:
         first_date = user_data['calendar']['first_date']
@@ -161,14 +164,14 @@ def check_order_datetime_allowed(dtime):
     return res
 
 
-def calculate_delivery_fee(delivery_method, location, total, is_vip):
+def calculate_delivery_fee(delivery_method, location, total, special_client):
     if delivery_method == Order.DELIVERY:
         if location and location.delivery_fee is not None:
             delivery_fee, delivery_min = location.delivery_fee, location.delivery_min
         else:
             delivery_fee, delivery_min = config.delivery_fee, config.delivery_min
         if total < delivery_min or delivery_min == 0:
-            if not is_vip or config.delivery_fee_for_vip:
+            if not special_client:
                 return delivery_fee
     return 0
 
@@ -282,6 +285,7 @@ def get_all_product_counts(product):
 
 
 def get_users_products(user, category=None):
+    # if user.
     db_query = (
         (UserGroupCount.user == user)
         | ((GroupProductCountPermission.permission == user.permission) & (UserGroupCount.price_group.is_null(True)))
@@ -290,16 +294,12 @@ def get_users_products(user, category=None):
     user_group_prices = GroupProductCount.select().join(GroupProductCountPermission, JOIN.LEFT_OUTER) \
         .switch(GroupProductCount).join(UserGroupCount, JOIN.LEFT_OUTER).where(db_query).group_by(GroupProductCount.id)
     user_group_prices = list(user_group_prices)
-    # print('debug groups')
-    # for ugp in user_group_prices:
-    #     print(ugp.name)
-    db_query = (ProductGroupCount.price_group.is_null(True) | ProductGroupCount.price_group.in_(user_group_prices))
+    db_query = ((ProductGroupCount.product.is_null(True)) | (ProductGroupCount.price_group.in_(user_group_prices)))
     db_query = [Product.is_active == True, db_query]
     if category:
         db_query.append(Product.category == category)
-    products = Product.select().join(ProductGroupCount).where(*db_query).group_by(Product.id)
-    # print('prods debug')
-    # print(list(products))
+    products = Product.select().join(ProductGroupCount, JOIN.LEFT_OUTER).where(*db_query).group_by(Product.id)
+    print(list(products))
     return products
 
 
@@ -562,6 +562,8 @@ def send_lottery_messages(bot):
         last_sent_date = config.lottery_messages_sent
         if last_sent_date:
             now = datetime.datetime.now()
+            il_tz = timezone('Asia/Jerusalem')
+            now = il_tz.localize(now)
             interval = datetime.timedelta(hours=config.lottery_messages_interval)
             time_remains = (last_sent_date + interval) - now
             if time_remains.days >= 0:
@@ -593,6 +595,8 @@ def send_lottery_messages(bot):
                 msg = messages.create_lottery_channel_msg(_, active_lottery)
                 bot.send_message(channel.channel_id, msg, parse_mode=ParseMode.MARKDOWN, timeout=20)
         now = datetime.datetime.now()
+        il_tz = timezone('Asia/Jerusalem')
+        now = il_tz.localize(now)
         config.set_datetime_value('lottery_messages_sent', now)
 
 
@@ -601,10 +605,15 @@ def send_channel_advertisments(bot):
 
     def send_ad(ad):
         channels = Channel.select().join(ChannelAd, JOIN.LEFT_OUTER).where(ChannelAd.ad == ad)
-        for channel in channels:
+        users = User.select().join(UserAd, JOIN.LEFT_OUTER).where(UserAd.ad == ad)
+        chats_ids = [channel.channel_id for channel in channels] + [user.telegram_id for user in users]
+        for chat_id in chats_ids:
             func = getattr(bot, 'send_{}'.format(ad.media_type))
-            func(channel.channel_id, ad.media, caption=ad.text)
-        ad.last_sent_date = datetime.datetime.now()
+            func(chat_id, ad.media, caption=ad.text)
+        now = datetime.datetime.now()
+        il_tz = timezone('Asia/Jerusalem')
+        now = il_tz.localize(now)
+        ad.last_sent_date = now
         ad.save()
 
     while True:
@@ -614,8 +623,14 @@ def send_channel_advertisments(bot):
             for ad in ads:
                 if ad.last_sent_date:
                     now = datetime.datetime.now()
+                    il_tz = timezone('Asia/Jerusalem')
+                    now = il_tz.localize(now)
                     interval = datetime.timedelta(hours=ad.interval)
-                    time_remains = (ad.last_sent_date + interval) - now
+                    last_sent, offset = ad.last_sent_date.split('+')
+                    offset = '+' + offset.replace(':', '')
+                    last_sent += offset
+                    last_sent = datetime.datetime.strptime(last_sent, '%Y-%m-%d %H:%M:%S.%f%z')
+                    time_remains = (last_sent + interval) - now
                     if time_remains.days >= 0:
                         ads_to_send.append((ad, time_remains))
                         continue

@@ -4,6 +4,8 @@ import requests
 
 from requests.exceptions import ConnectionError
 
+from pytz import timezone
+
 from .btc_settings import BtcSettings
 from .helpers import config, quantize_btc, logger
 from .models import CurrencyRates, Currencies
@@ -210,6 +212,8 @@ class CurrencyConverter:
         last_updated = config.currencies_last_updated
         if last_updated:
             now = datetime.now()
+            il_tz = timezone('Asia/Jerusalem')
+            now = il_tz.localize(now)
             diff = now - last_updated
             diff_more = diff.seconds / 3600 >= 1
         else:
@@ -239,6 +243,8 @@ class CurrencyConverter:
                     currency.dollar_rate = rate
                     currency.save()
                 now = datetime.now()
+                il_tz = timezone('Asia/Jerusalem')
+                now = il_tz.localize(now)
                 config.set_datetime_value('currencies_last_updated', now)
 
     @staticmethod

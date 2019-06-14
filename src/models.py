@@ -5,7 +5,9 @@ from gettext import gettext as _
 from os.path import dirname, abspath, join
 from enum import Enum
 from peewee import Model, CharField, IntegerField, SqliteDatabase, \
-    ForeignKeyField, DecimalField, BlobField, BooleanField, TimeField, DateTimeField, TextField, OperationalError
+    ForeignKeyField, DecimalField, BlobField, BooleanField, TimeField, TextField, OperationalError
+from pytz import timezone
+from playhouse.sqlite_ext import DateTimeField
 
 d = dirname(dirname(abspath(__file__)))
 db = SqliteDatabase(join(d, 'db.sqlite'))
@@ -14,6 +16,40 @@ db = SqliteDatabase(join(d, 'db.sqlite'))
 class BaseModel(Model):
     class Meta:
         database = db
+
+
+def format_date_time(value, formats, post_process=None):
+    post_process = post_process or (lambda x: x)
+    for fmt in formats:
+        try:
+            value, offset = value.rsplit('+')
+            offset = '+' + offset.replace(':', '')
+            value = value + offset
+            return post_process(datetime.datetime.strptime(value, fmt))
+        except ValueError:
+            pass
+    return value
+
+
+class DateTimeTZField(DateTimeField):
+    formats = [
+        '%Y-%m-%d %H:%M:%S.%f%z',
+        '%Y-%m-%d %H:%M:%S.%f',
+        '%Y-%m-%d %H:%M:%S',
+        '%Y-%m-%d',
+    ]
+
+    def adapt(self, value):
+        if value and isinstance(value, str):
+            return format_date_time(value, self.formats)
+        return value
+
+
+def israel_now():
+    now = datetime.datetime.now()
+    il_tz = timezone('Asia/Jerusalem')
+    now = il_tz.localize(now)
+    return now
 
 
 class Currencies:
@@ -105,6 +141,15 @@ class UserPermission(BaseModel):
         users_permissions = UserPermission.select().where(UserPermission.permission.in_(users_permissions))
         return users_permissions
 
+    @staticmethod
+    def get_admin_permissions():
+        admin_permissions = [
+            UserPermission.AUTHORIZED_RESELLER, UserPermission.FAMILY, UserPermission.FRIEND,
+            UserPermission.VIP_CLIENT, UserPermission.CLIENT, UserPermission.OWNER, UserPermission.LOGISTIC_MANAGER
+        ]
+        permissions = UserPermission.select().where(UserPermission.permission.in_(admin_permissions))
+        return permissions
+
 
 class User(BaseModel):
     username = CharField(null=True)
@@ -113,8 +158,9 @@ class User(BaseModel):
     phone_number = CharField(null=True)
     permission = ForeignKeyField(UserPermission, related_name='users')
     banned = BooleanField(default=False)
-    registration_time = DateTimeField(default=datetime.datetime.now)
+    registration_time = DateTimeTZField(default=israel_now)
     currency = CharField(default=Currencies.DOLLAR, choices=Currencies.CHOICES)
+    registration_msg_id = CharField(null=True)
 
     @property
     def is_admin(self):
@@ -241,6 +287,10 @@ class ProductWarehouse(BaseModel):
     count = IntegerField(default=0)
 
 
+class DeliveryFeePermission(BaseModel):
+    permission = ForeignKeyField(UserPermission, related_name='delivery_fees')
+
+
 class DeliveryMethod(Enum):
     PICKUP = 1
     DELIVERY = 2
@@ -268,7 +318,7 @@ class Order(BaseModel):
     location = ForeignKeyField(Location, null=True)
     status = IntegerField(default=CONFIRMED, choices=STATUSES)
     client_notified = BooleanField(default=False)
-    date_created = DateTimeField(default=datetime.datetime.now)
+    date_created = DateTimeTZField(default=israel_now)
     address = CharField(default='', null=True)
     total_cost = DecimalField(default=0)
     btc_payment = BooleanField(default=False)
@@ -280,6 +330,8 @@ class Order(BaseModel):
     order_hidden_text = TextField(default='')
     order_text = TextField(default='')
     order_text_msg_id = TextField(null=True)
+
+    picked_by_courier = BooleanField(default=False)
 
     def get_delivery_display(self):
         return dict(self.DELIVERY_METHODS)[self.shipping_method]
@@ -392,11 +444,13 @@ class CourierChatMessage(BaseModel):
     chat = ForeignKeyField(CourierChat, related_name='messages')
     msg_type = CharField()
     message = CharField()
+    caption = CharField()
     author = ForeignKeyField(User, related_name='read_messages')
     replied = BooleanField(default=False)
     read = BooleanField(default=False)
     sent_msg_id = CharField(null=True)
-    date_created = DateTimeField(default=datetime.datetime.now)
+    # status_msg_id = CharField(null=True)
+    date_created = DateTimeTZField(default=israel_now)
 
 
 class Lottery(BaseModel):
@@ -412,8 +466,8 @@ class Lottery(BaseModel):
         (SINGLE_PRODUCT, 'Single Product'), (CATEGORY, 'Category'), (ALL_PRODUCTS, 'All products')
     )
     active = BooleanField(default=False)
-    created_date = DateTimeField(default=datetime.datetime.now)
-    completed_date = DateTimeField(null=True)
+    created_date = DateTimeTZField(default=israel_now)
+    completed_date = DateTimeTZField(null=True)
     num_codes = IntegerField(default=0)
     num_tickets = IntegerField(default=0)
     by_condition = IntegerField(choices=BY, default=PRODUCT)
@@ -449,14 +503,14 @@ class LotteryParticipant(BaseModel):
     participant = ForeignKeyField(User, related_name='lotteries')
     lottery = ForeignKeyField(Lottery, related_name='participants', null=True)
     is_pending = BooleanField(default=False)
-    created_date = DateTimeField(default=datetime.datetime.now)
+    created_date = DateTimeTZField(default=israel_now)
 
 
 class Review(BaseModel):
     user = ForeignKeyField(User, related_name='reviews')
     order = ForeignKeyField(Order, related_name='reviews')
     text = CharField(null=True)
-    date_created = DateTimeField(default=datetime.datetime.now)
+    date_created = DateTimeTZField(default=israel_now)
     is_pending = BooleanField(default=True)
 
 
@@ -476,12 +530,17 @@ class Ad(BaseModel):
     media = CharField(null=True)
     media_type = CharField(null=True)
     interval = IntegerField(default=2)
-    last_sent_date = DateTimeField(null=True)
+    last_sent_date = DateTimeTZField(null=True)
 
 
 class ChannelAd(BaseModel):
     channel = ForeignKeyField(Channel, related_name='ads')
     ad = ForeignKeyField(Ad, related_name='channels')
+
+
+class UserAd(BaseModel):
+    user = ForeignKeyField(User, related_name='ads')
+    ad = ForeignKeyField(Ad, related_name='users')
 
 
 def create_tables():
@@ -499,7 +558,7 @@ def create_tables():
             CurrencyRates, BitcoinCredentials, OrderBtcPayment, BtcProc, ConfigValue, UserIdentificationAnswer, CourierLocation,
             WorkingHours, GroupProductCountPermission, CourierChat, CourierChatMessage, IdentificationPermission,
             Lottery, LotteryParticipant, LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion,
-            ReviewQuestionRank, Ad, ChannelAd, AllowedSetting
+            ReviewQuestionRank, Ad, ChannelAd, UserAd, AllowedSetting, DeliveryFeePermission
         ], safe=True
     )
 

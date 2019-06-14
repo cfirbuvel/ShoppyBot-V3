@@ -7,6 +7,7 @@ from telegram import ReplyKeyboardRemove
 from telegram.error import TelegramError
 from telegram.utils.helpers import escape_markdown, escape
 from peewee import fn, JOIN
+from pytz import timezone
 
 from . import enums, keyboards, shortcuts, messages, states
 from .btc_wrapper import CurrencyConverter
@@ -19,7 +20,8 @@ from .models import Product, ProductCount, Location, ProductWarehouse, User, \
     ChannelMessageData, GroupProductCount, delete_db, create_tables, Currencies, BitcoinCredentials, \
     Channel, UserPermission, ChannelPermissions, CourierLocation, WorkingHours, GroupProductCountPermission, \
     OrderBtcPayment, CurrencyRates, BtcProc, OrderItem, IdentificationPermission, Lottery, LotteryParticipant, \
-    LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion, Ad, ChannelAd, AllowedSetting
+    LotteryPermission, ProductGroupCount, UserGroupCount, Review, ReviewQuestion, Ad, ChannelAd, AllowedSetting, \
+    DeliveryFeePermission, UserAd
 
 
 @user_passes
@@ -929,8 +931,55 @@ def on_statistics_users(bot, update, user_data):
         query.answer()
         return enums.ADMIN_STATISTICS_TOP_CLIENTS
     elif action == 'clients_all':
+        msg = _('👫 All clients')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.select_users_keyboard(_))
+        query.answer()
+        return enums.ADMIN_STATISTICS_ALL_CLIENTS
+        # user_data['listing_page'] = 1
+        #
+        # return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id)
+
+
+@user_allowed(AllowedSetting.STATISTICS)
+@user_passes
+def on_statistics_all_clients(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action = query.data
+    if action == 'search':
+        msg = _('Please enter username')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_))
+        query.answer()
+        return enums.ADMIN_STATISTICS_USER_SEARCH
+    elif action == 'select':
         user_data['listing_page'] = 1
         return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id)
+    else:
+        msg = _('🌝 Statistics by users')
+        reply_markup = keyboards.statistics_users(_)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_STATISTICS_USERS
+
+
+@user_allowed(AllowedSetting.STATISTICS)
+@user_passes
+def on_statistics_user_search(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    if query:
+        msg = _('👫 All clients')
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=keyboards.select_users_keyboard(_))
+        query.answer()
+        return enums.ADMIN_STATISTICS_ALL_CLIENTS
+    username = update.message.text
+    user_data['listing_page'] = 1
+    user_data['stats_username'] = username
+    return states.enter_statistics_user_select(_, bot, chat_id, username=username)
 
 
 @user_allowed(AllowedSetting.STATISTICS)
@@ -950,7 +999,8 @@ def on_statistics_user_select(bot, update, user_data):
     elif action == 'page':
         page = int(val)
         user_data['listing_page'] = page
-        return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id, page)
+        return states.enter_statistics_user_select(_, bot, chat_id, msg_id=msg_id, query_id=query.id,
+                                                   page=page, username=user_data.get('stats_username'))
     else:
         user_data['stats_item_id'] = val
         state = enums.ADMIN_STATISTICS_USER_SELECT_DATE
@@ -1014,7 +1064,8 @@ def on_statistics_user_select_date(bot, update, user_data):
         return enums.ADMIN_STATISTICS_USER_ORDER_SELECT
     else:
         page = user_data['listing_page']
-        return states.enter_statistics_user_select(_, bot, chat_id, msg_id, query.id, page)
+        return states.enter_statistics_user_select(_, bot, chat_id, msg_id=msg_id, query_id=query.id,
+                                                   page=page, username=user_data.get('stats_username'))
 
 
 @user_allowed(AllowedSetting.STATISTICS)
@@ -1495,6 +1546,48 @@ def on_create_ad_channels(bot, update, user_data):
         query.answer()
         return enums.ADMIN_CREATE_AD_CHANNELS
     else:
+        msg = _('Please select users to send ad to')
+        users = User.select()
+        users = [(user.username, user.id, False) for user in users]
+        user_data['create_ad']['users'] = []
+        user_data['listing_page'] = 1
+        reply_markup = keyboards.general_select_keyboard(_, users)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        return enums.ADMIN_CREATE_AD_USERS
+        # msg = _('Please enter interval between messages in hours:')
+        # bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
+        # query.answer()
+        # return enums.ADMIN_CREATE_AD_INTERVAL
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_create_ad_users(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    selected_ids = user_data['create_ad']['users']
+    if action in ('page', 'select'):
+        val = int(val)
+        if action == 'select':
+            if val in selected_ids:
+                selected_ids.remove(val)
+            else:
+                selected_ids.append(val)
+            page = user_data['listing_page']
+        else:
+            page = val
+            user_data['listing_page'] = page
+        msg = _('Please select users to send ad to')
+        users = User.select(User.username, User.id).tuples()
+        users = [(username, user_id, user_id in selected_ids) for username, user_id in users]
+        user_data['create_ad']['users'] = selected_ids
+        reply_markup = keyboards.general_select_keyboard(_, users, page_num=page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        return enums.ADMIN_CREATE_AD_USERS
+    else:
         msg = _('Please enter interval between messages in hours:')
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.back_cancel_keyboard(_))
         query.answer()
@@ -1535,11 +1628,15 @@ def on_create_ad_interval(bot, update, user_data):
             return enums.ADMIN_CREATE_AD_INTERVAL
         ad_data = user_data['create_ad']
         channels_ids = ad_data.pop('channels')
+        user_ids = ad_data.pop('users')
         ads_exists = Ad.select().exists()
         ad = Ad.create(interval=interval, **ad_data)
         for channel_id in channels_ids:
             channel = Channel.get(id=channel_id)
             ChannelAd.create(ad=ad, channel=channel)
+        for user_id in user_ids:
+            user = User.get(id=user_id)
+            UserAd.create(user=user, ad=ad)
         if not ads_exists:
             shortcuts.send_channel_advertisments(bot)
         msg = _('New advertisment has been created!')
@@ -1672,6 +1769,18 @@ def on_ad_edit(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_AD_EDIT_CHANNELS
+    elif action == 'ad_users':
+        msg = _('Please select users to send ad to')
+        users = User.select(User.username, User.id).tuples()
+        selected_ids = UserAd.select().where(UserAd.ad == ad)
+        selected_ids = [item.user.id for item in selected_ids]
+        user_data['ad_detail']['users'] = selected_ids
+        user_data['listing_page'] = 1
+        users = [(username, user_id, user_id in selected_ids) for username, user_id in users]
+        reply_markup = keyboards.general_select_keyboard(_, users)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_USERS
     else:
         title = escape_markdown(ad.title)
         bot.delete_message(chat_id, msg_id)
@@ -1766,6 +1875,45 @@ def on_ad_edit_media(bot, update, user_data):
         msg = _('Ad media has been changed')
         bot.send_message(chat_id, msg, reply_markup=reply_markup)
     return enums.ADMIN_AD_EDIT
+
+
+@user_allowed(AllowedSetting.ADVERTISMENTS)
+@user_passes
+def on_ad_edit_users(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    selected_ids = user_data['ad_detail']['users']
+    if action in ('select', 'page'):
+        val = int(val)
+        if action == 'select':
+            if val in selected_ids:
+                selected_ids.remove(val)
+            else:
+                selected_ids.append(val)
+            page = user_data['listing_page']
+        else:
+            page = val
+            user_data['listing_page'] = page
+        msg = _('Please select users to send ad to')
+        users = User.select(User.username, User.id).tuples()
+        user_data['ad_detail']['users'] = selected_ids
+        users = [(username, user_id, user_id in selected_ids) for username, user_id in users]
+        reply_markup = keyboards.general_select_keyboard(_, users, page_num=page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_AD_EDIT_USERS
+    else:
+        ad = Ad.get(id=user_data['ad_detail']['ad_id'])
+        UserAd.delete().where(UserAd.ad == ad).execute()
+        for user_id in selected_ids:
+            user = User.get(id=user_id)
+            UserAd.create(user=user, ad=ad)
+        msg = _('Ad users has been updated.')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.edit_ad_keyboard(_))
+        return enums.ADMIN_AD_EDIT
 
 
 @user_allowed(AllowedSetting.ADVERTISMENTS)
@@ -1869,7 +2017,9 @@ def on_lottery(bot, update, user_data):
             msg += '\n'
             msg += _('You can take prize on the next order')
             bot.send_message(winner.participant.telegram_id, msg, parse_mode=ParseMode.MARKDOWN)
-        lottery.completed_date = datetime.now()
+        now = datetime.now()
+        now = timezone('Asia/Jerusalem').localize()
+        lottery.completed_date = now
         lottery.active = False
         lottery.save()
         msg = _('Lottery №{} completed!').format(lottery.id)
@@ -2917,9 +3067,19 @@ def on_registered_users_select(bot, update, user_data):
     elif action == 'registration_remove':
         msg = _('Remove registration for @{}?').format(user.username)
         reply_markup = keyboards.are_you_sure_keyboard(_)
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_REGISTERED_USERS_REMOVE
+    elif action == 'registration_orders':
+        orders = Order.select().where(Order.user == user)
+        orders = [(_('Order №{} {}').format(order.id, order.date_created.strftime('%d %b, %Y')), order.id) for order in orders]
+        orders.append((_('All orders'), 'all'))
+        reply_markup = keyboards.general_select_one_keyboard(_, orders)
+        msg = _('Please select order')
+        user_data['listing_page'] = 1
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_REGISTERED_USERS_ORDERS
     elif action == 'registration_status':
         msg = _('⭐️ Change user status')
         registered_perms = (UserPermission.OWNER, UserPermission.NOT_REGISTERED, UserPermission.PENDING_REGISTRATION)
@@ -2975,6 +3135,49 @@ def on_registered_users_remove(bot, update, user_data):
             msg += _('Status: {}').format(user.permission.get_permission_display())
             return states.enter_registered_users_select(_, bot, chat_id, msg, query.id, msg_id)
     return states.enter_unknown_command(_, bot, query)
+
+
+@user_allowed(AllowedSetting.USERS)
+@user_passes
+def on_registered_users_orders(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    user_id = user_data['user_select']
+    user = User.get(id=user_id)
+    if action in ('page', 'select'):
+        if action == 'select':
+            if val == 'all':
+                orders = Order.select().where(Order.user == user)
+                msg = messages.create_statistics_msg(_, orders)
+            else:
+                order = Order.get(id=val)
+                try:
+                    btc_data = OrderBtcPayment.get(order=order)
+                except OrderBtcPayment.DoesNotExist:
+                    btc_data = None
+                msg = messages.create_service_notice(_, order, btc_data)
+            page = user_data['listing_page']
+        else:
+            msg = _('Please select order')
+            page = int(val)
+            user_data['listing_page'] = page
+        orders = Order.select().where(Order.user == user)
+        orders = [(_('Order №{} {}').format(order.id, order.date_created.strftime('%d %b, %Y')), order.id) for order in
+                  orders]
+        orders.append((_('All orders'), 'all'))
+        reply_markup = keyboards.general_select_one_keyboard(_, orders, page_num=page)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_REGISTERED_USERS_ORDERS
+    else:
+        msg = '@{}'.format(user.username)
+        msg += '\n'
+        msg += _('Status: {}').format(user.permission.get_permission_display())
+        user_data['user_select'] = val
+        return states.enter_registered_users_select(_, bot, chat_id, msg, query.id, msg_id)
 
 
 @user_allowed(AllowedSetting.USERS)
@@ -3116,6 +3319,8 @@ def on_pending_registrations_approve(bot, update, user_data):
             perm = UserPermission.get(id=val)
             user.permission = perm
             user.save()
+            print(user.registration_msg_id)
+            bot.delete_message(get_service_channel(), user.registration_msg_id)
             perm_display = perm.get_permission_display()
             user_trans = get_trans(user.telegram_id)
             msg = user_trans('{}, your registration has been approved. Your status is {}').format(username, perm_display)
@@ -3144,6 +3349,7 @@ def on_pending_registrations_black_list(bot, update, user_data):
         if action == 'yes':
             user.banned = True
             user.save()
+            bot.delete_message(get_service_channel(), user.registration_msg_id)
             LotteryParticipant.delete().join(Lottery)\
                 .where(Lottery.completed_date == None | LotteryParticipant.is_pending == True,
                        LotteryParticipant.participant == user).execute()
@@ -3906,7 +4112,7 @@ def on_delivery(bot, update, user_data):
     elif action == 'edit_fee':
         return states.enter_delivery_fee(_, bot, chat_id, msg_id, query.id)
     elif action == 'back':
-        return states.enter_menu(bot, update, user_data, msg_id, query.id)
+        return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     else:
         return states.enter_unknown_command(_, bot, query)
 
@@ -3945,11 +4151,18 @@ def on_delivery_fee(bot, update, user_data):
     if action == 'add':
         return states.enter_delivery_fee_add(_, bot, chat_id, msg_id, query.id)
     elif action == 'back':
-        return states.enter_delivery_fee(_, bot, chat_id, msg_id, query.id)
-    elif action == 'vip':
-        conf_value = not config.delivery_fee_for_vip
-        config.set_value('delivery_fee_for_vip', conf_value)
-        return states.enter_delivery_fee(_, bot, chat_id, msg_id, query.id)
+        return states.enter_delivery_options(_, bot, chat_id, msg_id, query.id)
+    elif action == 'perms':
+        selected = DeliveryFeePermission.select()
+        selected_ids = [item.permission.id for item in selected]
+        permisssions = UserPermission.get_clients_permissions()
+        permisssions = UserPermission.select().where(UserPermission.permission.in_(permisssions))
+        permisssions = [(item.get_permission_display(), item.id, item.id in selected_ids) for item in permisssions]
+        reply_markup = keyboards.general_select_keyboard(_, permisssions)
+        user_data['delivery_fee_selected'] = selected_ids
+        msg = _('Please select special clients')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        return enums.ADMIN_DELIVERY_FEE_PERMISSIONS
     return states.enter_unknown_command(_, bot, query)
 
 
@@ -3992,6 +4205,37 @@ def on_add_delivery_for_location(bot, update, user_data):
         user_data['listing_page'] = page
         return states.enter_delivery_fee_location(_, bot, chat_id, msg_id, query.id, page)
     return states.enter_unknown_command(_, bot, query)
+
+
+@user_allowed(AllowedSetting.DELIVERY)
+@user_passes
+def on_delivery_fee_permissions(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    selected_ids = user_data['delivery_fee_selected']
+    if action == 'select':
+        val = int(val)
+        if val in selected_ids:
+            selected_ids.remove(val)
+        else:
+            selected_ids.append(val)
+        # user_data['delivery_fee_selected'] = selected_ids
+        permisssions = UserPermission.get_clients_permissions()
+        permisssions = UserPermission.select().where(UserPermission.permission.in_(permisssions))
+        permisssions = [(item.get_permission_display(), item.id, item.id in selected_ids) for item in permisssions]
+        reply_markup = keyboards.general_select_keyboard(_, permisssions)
+        msg = _('Please select special clients')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        return enums.ADMIN_DELIVERY_FEE_PERMISSIONS
+    else:
+        DeliveryFeePermission.delete().execute()
+        for item in selected_ids:
+            permission = UserPermission.get(id=item)
+            DeliveryFeePermission.create(permission=permission)
+        return states.enter_delivery_fee(_, bot, chat_id, msg_id, query.id)
 
 
 @user_allowed(AllowedSetting.DELIVERY)
@@ -4065,6 +4309,13 @@ def on_admin_categories(bot, update, user_data):
                               reply_markup=keyboards.cancel_button(_))
         query.answer()
         return enums.ADMIN_CATEGORY_ADD
+    elif action == 'edit':
+        msg = _('Please select a category')
+        categories = ProductCategory.select(ProductCategory.title, ProductCategory.id).tuples()
+        user_data['listing_page'] = 1
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.general_select_one_keyboard(_, categories))
+        query.answer()
+        return enums.ADMIN_CATEGORY_EDIT
     elif action == 'back':
         return states.enter_order_options(_, bot, chat_id, user_id, msg_id, query.id)
     categories = ProductCategory.select(ProductCategory.title, ProductCategory.id).tuples()
@@ -4077,6 +4328,62 @@ def on_admin_categories(bot, update, user_data):
         return enums.ADMIN_CATEGORY_PRODUCTS_SELECT
     elif action == 'remove':
         return enums.ADMIN_CATEGORY_REMOVE_SELECT
+
+
+@user_allowed(AllowedSetting.CATEGORIES)
+@user_passes
+def on_admin_category_edit(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = query.message.chat_id
+    msg_id = query.message.message_id
+    action, val = query.data.split('|')
+    if action == 'page':
+        page = int(val)
+        msg = _('Please select a category')
+        categories = ProductCategory.select(ProductCategory.title, ProductCategory.id).tuples()
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.general_select_one_keyboard(_, categories, page))
+        query.answer()
+        return enums.ADMIN_CATEGORY_EDIT
+    elif action == 'select':
+        user_data['admin_edit_category'] = val
+        category = ProductCategory.get(id=val)
+        category_name = escape_markdown(category.title)
+        msg = _('Please enter new name for `{}`').format(category_name)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_), parse_mode=ParseMode.MARKDOWN)
+        query.answer()
+        return enums.ADMIN_CATEGORY_EDIT_NAME
+    else:
+        msg = _('🛍 Categories')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.create_categories_keyboard(_))
+        return enums.ADMIN_CATEGORIES
+
+
+@user_allowed(AllowedSetting.CATEGORIES)
+@user_passes
+def on_admin_category_edit_name(bot, update, user_data):
+    query = update.callback_query
+    user_id = get_user_id(update)
+    chat_id = update.effective_chat.id
+    _ = get_trans(user_id)
+    page = user_data['listing_page']
+    msg = _('Please select a category')
+    if query and query.data == 'back':
+        categories = ProductCategory.select(ProductCategory.title, ProductCategory.id).tuples()
+        reply_markup = keyboards.general_select_one_keyboard(_, categories, page)
+        bot.edit_message_text(msg, chat_id, query.message.message_id, reply_markup=reply_markup)
+        query.answer()
+    else:
+        name = update.message.text
+        cat_id = user_data['admin_edit_category']
+        cat = ProductCategory.get(id=cat_id)
+        cat.title = name
+        cat.save()
+        categories = ProductCategory.select(ProductCategory.title, ProductCategory.id).tuples()
+        reply_markup = keyboards.general_select_one_keyboard(_, categories, page)
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    return enums.ADMIN_CATEGORY_EDIT
 
 
 @user_allowed(AllowedSetting.CATEGORIES)
@@ -5824,11 +6131,7 @@ def on_admin_product_price_group_selected(bot, update, user_data):
     elif action == 'special_clients':
         group = GroupProductCount.get(id=val)
         msg = _('Please select special clients for group {}').format(group.name)
-        permissions = [
-            UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
-            UserPermission.VIP_CLIENT, UserPermission.CLIENT
-        ]
-        permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+        permissions = UserPermission.get_admin_permissions()
         group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
         group_perms = [group_perm.permission for group_perm in group_perms]
         special_clients = []
@@ -5844,28 +6147,33 @@ def on_admin_product_price_group_selected(bot, update, user_data):
         query.answer()
         return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS
     elif action == 'users':
-        group = GroupProductCount.get(id=val)
-        group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
-        if group_perms:
-            permissions = [item.permission for item in group_perms]
-        else:
-            permissions = UserPermission.get_clients_permissions()
-        users = User.select().where(User.banned == False, User.permission.in_(permissions)).order_by(User.permission)
-        user_choices = []
-        selected_ids = []
-        for user in users:
-            name = '{} - {}'.format(user.username, user.permission.get_permission_display())
-            user_groups = [user_group.price_group for user_group in  user.price_groups]
-            is_picked = group in user_groups
-            user_choices.append((name, user.id, is_picked))
-            if is_picked:
-                selected_ids.append(user.id)
-        user_data['admin_special_clients'] = {'selected_users': selected_ids, 'group_id': val}
-        msg = _('Please select users for price group {}').format(group.name)
-        reply_markup = keyboards.general_select_keyboard(_, user_choices)
-        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        msg = _('🚶‍♂️ Specific clients')
+        user_data['admin_specific_clients'] = {'group_id': val}
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.select_users_keyboard(_))
         query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_USERS
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_USERS
+        # group = GroupProductCount.get(id=val)
+        # group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
+        # if group_perms:
+        #     permissions = [item.permission for item in group_perms]
+        # else:
+        #     permissions = UserPermission.get_clients_permissions()
+        # users = User.select().where(User.banned == False, User.permission.in_(permissions)).order_by(User.permission)
+        # user_choices = []
+        # selected_ids = []
+        # for user in users:
+        #     name = '{} - {}'.format(user.username, user.permission.get_permission_display())
+        #     user_groups = [user_group.price_group for user_group in  user.price_groups]
+        #     is_picked = group in user_groups
+        #     user_choices.append((name, user.id, is_picked))
+        #     if is_picked:
+        #         selected_ids.append(user.id)
+        # user_data['admin_special_clients'] = {'selected_users': selected_ids, 'group_id': val}
+        # msg = _('Please select users for price group {}').format(group.name)
+        # reply_markup = keyboards.general_select_keyboard(_, user_choices)
+        # bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        # query.answer()
+        # return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_USERS
     elif action in ('back', 'delete'):
         if action == 'delete':
             group = GroupProductCount.get(id=val)
@@ -5902,7 +6210,7 @@ def on_admin_product_price_group_clients(bot, update, user_data):
         group_id = user_data['admin_special_clients']['group_id']
         group = GroupProductCount.get(id=group_id)
         msg = _('Please select special clients for group {}').format(group.name)
-        permissions = UserPermission.get_clients_permissions()
+        permissions = UserPermission.get_admin_permissions()
         selected_ids = user_data['admin_special_clients']['selected_perms']
         val = int(val)
         if val in selected_ids:
@@ -5917,7 +6225,7 @@ def on_admin_product_price_group_clients(bot, update, user_data):
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
         return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS
-    elif action  in ('done', 'back'):
+    elif action in ('done', 'back'):
         group_id = user_data['admin_special_clients']['group_id']
         if action == 'done':
             group = GroupProductCount.get(id=group_id)
@@ -5932,22 +6240,109 @@ def on_admin_product_price_group_clients(bot, update, user_data):
 
 @user_allowed(AllowedSetting.PRICE_GROUPS)
 @user_passes
-def on_admin_product_price_group_clients_users(bot, update, user_data):
+def on_admin_product_price_group_users(bot, update, user_data):
     user_id = get_user_id(update)
     _ = get_trans(user_id)
     query = update.callback_query
     chat_id, msg_id = query.message.chat_id, query.message.message_id
-    action, val = query.data.split('|')
-    selected_ids = user_data['admin_special_clients']['selected_users']
-    group_id = user_data['admin_special_clients']['group_id']
-    group = GroupProductCount.get(id=group_id)
-    if action in ('page', 'select'):
+    action = query.data
+    group_id = user_data['admin_specific_clients']['group_id']
+    if action == 'select':
+        group = GroupProductCount.get(id=group_id)
         group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
         if group_perms:
             permissions = [item.permission for item in group_perms]
         else:
             permissions = UserPermission.get_clients_permissions()
         users = User.select().where(User.banned == False, User.permission.in_(permissions)).order_by(User.permission)
+        user_choices = []
+        selected_ids = []
+        for user in users:
+            name = '{} - {}'.format(user.username, user.permission.get_permission_display())
+            user_groups = [user_group.price_group for user_group in user.price_groups]
+            is_picked = group in user_groups
+            user_choices.append((name, user.id, is_picked))
+            if is_picked:
+                selected_ids.append(user.id)
+        user_data['admin_specific_clients']['selected_ids'] = selected_ids
+        msg = _('Please select users for price group {}').format(group.name)
+        reply_markup = keyboards.general_select_keyboard(_, user_choices)
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+        query.answer()
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_USERS_SELECT
+    elif action == 'search':
+        msg = _('Please enter username to search')
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=keyboards.cancel_button(_))
+        query.answer()
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_USERS_SEARCH
+    else:
+        del user_data['admin_specific_clients']
+        return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
+
+
+@user_allowed(AllowedSetting.PRICE_GROUPS)
+@user_passes
+def on_admin_product_price_group_users_search(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    chat_id = update.effective_chat.id
+    query = update.callback_query
+    group_id = user_data['admin_specific_clients']['group_id']
+    if query:
+        return states.enter_price_group_selected(_, bot, chat_id, group_id, query.message.message_id, query.id)
+    username = update.message.text
+    group = GroupProductCount.get(id=group_id)
+    group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
+    if group_perms:
+        permissions = [item.permission for item in group_perms]
+    else:
+        permissions = UserPermission.get_clients_permissions()
+    users = User.select().where(User.banned == False, User.permission.in_(permissions), User.username.contains(username)).order_by(User.permission)
+    if not users.exists():
+        msg = _('Users not found by `{}`').format(username)
+        msg += '\n'
+        msg += _('Please enter username to search')
+        bot.send_message(chat_id, msg, reply_markup=keyboards.cancel_button(_), parse_mode=ParseMode.MARKDOWN)
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_USERS_SEARCH
+    user_choices = []
+    selected_ids = []
+    for user in users:
+        name = '{} - {}'.format(user.username, user.permission.get_permission_display())
+        user_groups = [user_group.price_group for user_group in user.price_groups]
+        is_picked = group in user_groups
+        user_choices.append((name, user.id, is_picked))
+        if is_picked:
+            selected_ids.append(user.id)
+    user_data['admin_specific_clients']['selected_ids'] = selected_ids
+    user_data['admin_specific_clients']['username'] = username
+    msg = _('Please select users for price group {}').format(group.name)
+    reply_markup = keyboards.general_select_keyboard(_, user_choices)
+    bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    return enums.ADMIN_PRODUCT_PRICE_GROUP_USERS_SELECT
+
+
+@user_allowed(AllowedSetting.PRICE_GROUPS)
+@user_passes
+def on_admin_product_price_group_users_select(bot, update, user_data):
+    user_id = get_user_id(update)
+    _ = get_trans(user_id)
+    query = update.callback_query
+    chat_id, msg_id = query.message.chat_id, query.message.message_id
+    action, val = query.data.split('|')
+    selected_ids = user_data['admin_specific_clients']['selected_ids']
+    group_id = user_data['admin_specific_clients']['group_id']
+    group = GroupProductCount.get(id=group_id)
+    if action in ('page', 'select'):
+        group_perms = GroupProductCountPermission.select().where(GroupProductCountPermission.price_group == group)
+        if group_perms:
+            permissions = [item.permission for item in group_perms]
+        else:
+            permissions = UserPermission.get_admin_permissions()
+        db_query = [User.banned == False, User.permission.in_(permissions)]
+        username = user_data['admin_specific_clients'].get('username')
+        if username:
+            db_query.append(User.username.contains(username))
+        users = User.select().where(*db_query).order_by(User.permission)
         if action == 'select':
             page = 1
             val = int(val)
@@ -5962,12 +6357,12 @@ def on_admin_product_price_group_clients_users(bot, update, user_data):
             name = '{} - {}'.format(user.username, user.permission.get_permission_display())
             is_picked = user.id in selected_ids
             user_choices.append((name, user.id, is_picked))
-        user_data['admin_special_clients']['selected_users'] = selected_ids
+        user_data['admin_specific_clients']['selected_ids'] = selected_ids
         msg = _('Please select users for price group {}').format(group.name)
         reply_markup = keyboards.general_select_keyboard(_, user_choices, page_num=page)
         bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
         query.answer()
-        return enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_USERS
+        return enums.ADMIN_PRODUCT_PRICE_GROUP_USERS_SELECT
     elif action == 'done':
         users = User.select().where(User.id.in_(selected_ids))
         UserGroupCount.delete().where(UserGroupCount.price_group == group).execute()
@@ -5976,7 +6371,6 @@ def on_admin_product_price_group_clients_users(bot, update, user_data):
                 UserGroupCount.get(price_group=group, user=user)
             except UserGroupCount.DoesNotExist:
                 UserGroupCount.create(price_group=group, user=user)
-        del user_data['admin_special_clients']
         return states.enter_price_group_selected(_, bot, chat_id, group_id, msg_id, query.id)
 
 
@@ -6061,11 +6455,7 @@ def on_admin_product_price_group_prices(bot, update, user_data):
     else:
         user_data['price_group']['group_prices'] = prices
         msg = _('Please select special clients for group')
-        permissions = [
-            UserPermission.FAMILY, UserPermission.FRIEND, UserPermission.AUTHORIZED_RESELLER,
-            UserPermission.VIP_CLIENT, UserPermission.CLIENT
-        ]
-        permissions = UserPermission.select().where(UserPermission.permission.in_(permissions))
+        permissions = UserPermission.get_admin_permissions()
         special_clients = [(perm.get_permission_display(), perm.id, False) for perm in permissions]
         user_data['price_group']['selected_perms_ids'] = []
         reply_markup = keyboards.general_select_keyboard(_, special_clients)
@@ -6083,7 +6473,7 @@ def on_admin_product_price_group_permissions_new(bot, update, user_data):
     action, val = query.data.split('|')
     if action == 'select':
         msg = _('Please select special clients for group')
-        permissions = UserPermission.get_clients_permissions()
+        permissions = UserPermission.get_admin_permissions()
         selected_ids = user_data['price_group']['selected_perms_ids']
         val = int(val)
         if val in selected_ids:

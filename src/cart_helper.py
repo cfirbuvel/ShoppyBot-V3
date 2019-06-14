@@ -5,7 +5,7 @@ from peewee import JOIN
 from .btc_wrapper import CurrencyConverter
 from .helpers import config
 from .models import ProductCount, Product, User, OrderItem, GroupProductCount, UserGroupCount, \
-    GroupProductCountPermission, ProductGroupCount
+    GroupProductCountPermission, ProductGroupCount, UserPermission
 
 
 class Cart:

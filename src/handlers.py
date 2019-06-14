@@ -7,6 +7,7 @@ from telegram import ParseMode, ReplyKeyboardRemove
 from telegram.ext import ConversationHandler
 from telegram.utils.helpers import escape_markdown
 from peewee import fn, JOIN
+from pytz import timezone
 
 from . import keyboards, enums, shortcuts, messages, states
 from .cart_helper import Cart
@@ -18,7 +19,8 @@ from .helpers import get_user_id, get_username, get_locale, get_trans, config, l
 from .models import User, Product, ProductCategory, Order, Location, OrderBtcPayment, BitcoinCredentials, \
     Channel, UserPermission, IdentificationStage, IdentificationQuestion, UserIdentificationAnswer,\
     ChannelPermissions, WorkingHours, BtcStage, ProductWarehouse, CourierLocation, Currencies, CourierChat, \
-    CourierChatMessage, IdentificationPermission, Lottery, LotteryParticipant, Review, ReviewQuestion, ReviewQuestionRank
+    CourierChatMessage, IdentificationPermission, Lottery, LotteryParticipant, Review, ReviewQuestion, \
+    ReviewQuestionRank, DeliveryFeePermission
 
 
 @user_passes
@@ -451,21 +453,30 @@ def on_chat_send(bot, update, user_data):
             if msg_data:
                 break
         status_msg = _('Message has been sent.')
+        params = {}
         if msg_type in ('photo', 'video'):
             if type(msg_data) == list:
                 msg_data = msg_data[-1]
             msg_data = msg_data.file_id
+            caption = update.message.caption or ''
+            msg_caption = caption + '\n'
+            msg_caption += status_msg
             if msg_type == 'video':
-                sent_msg = bot.send_video(chat_id, msg_data, caption=status_msg)
+                sent_msg = bot.send_video(chat_id, msg_data, caption=msg_caption)
             else:
-                sent_msg = bot.send_photo(chat_id, msg_data, caption=status_msg)
+                sent_msg = bot.send_photo(chat_id, msg_data, caption=msg_caption)
+            # status_msg_id = bot.send_message(chat_id, status_msg)['message_id']
+            params['caption'] = caption
         else:
             msg = msg_data
             msg += '\n\n'
             msg += status_msg
             sent_msg = bot.send_message(chat_id, msg)
-        chat_msg = CourierChatMessage.create(chat=chat, msg_type=msg_type, message=msg_data,
-                                             sent_msg_id=sent_msg['message_id'], author=user)
+        params.update({
+            'chat': chat, 'msg_type': msg_type, 'message': msg_data, 'sent_msg_id': sent_msg['message_id'],
+            'author': user
+        })
+        chat_msg = CourierChatMessage.create(**params)
         msg = _('⌨️ Chat with courier')
         ping = False
         if not chat.ping_sent:
@@ -509,13 +520,19 @@ def on_open_chat_msg(bot, update, user_data):
     msg = _('⌨️ Chat with courier')
     if msg_type in ('video', 'photo'):
         bot.delete_message(chat_id, msg_id)
-        caption = _('From courier')
+        msg = _('From courier')
+        bot.send_message(chat_id, msg)
+        caption = chat_msg.caption
         if msg_type == 'video':
             bot.send_video(chat_id, client_msg, caption=caption)
-            bot.edit_message_caption(courier.telegram_id, courier_msg_id, caption=read_msg)
+            #bot.edit_message_caption(courier.telegram_id, courier_msg_id, caption=read_msg)
         else:
             bot.send_photo(chat_id, client_msg, caption=caption)
-            bot.edit_message_caption(courier.telegram_id, courier_msg_id, caption=read_msg)
+            # bot.edit_message_caption(courier.telegram_id, courier_msg_id, caption=read_msg)
+        caption += '\n'
+        caption += read_msg
+        bot.edit_message_caption(courier.telegram_id, courier_msg_id, caption=caption)
+        # bot.edit_message_text(read_msg, courier.telegram_id, chat_msg.status_msg_id)
     else:
         open_msg = _('From courier:')
         open_msg += '\n\n'
@@ -631,6 +648,8 @@ def on_order_datetime_select(bot, update, user_data):
     action = query.data
     if action == 'now':
         now = datetime.datetime.now()
+        il_tz = timezone('Asia/Jerusalem')
+        now = il_tz.localize(now)
         if not shortcuts.check_order_datetime_allowed(now):
             msg = _('Cannot make order today.')
             msg += '\n'
@@ -638,7 +657,6 @@ def on_order_datetime_select(bot, update, user_data):
             return states.enter_order_shipping_time(_, bot, chat_id, msg_id, query.id, msg)
         user_data['order_details']['datetime'] = 'now'
         user = User.get(telegram_id=user_id)
-        now = datetime.datetime.now()
         id_stages = None
         if not user.is_registered:
             id_stages = IdentificationStage.select().where(IdentificationStage.active == True)
@@ -647,9 +665,7 @@ def on_order_datetime_select(bot, update, user_data):
                 id_stages = IdentificationStage.select().join(IdentificationPermission)\
                     .where(IdentificationStage.for_order == True, IdentificationStage.active == True,
                            IdentificationPermission.permission == user.permission)
-        if id_stages and id_stages.exists():
-            print(list(id_stages))
-            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
+        if id_stages and id_stages.exists():            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
         if BitcoinCredentials.select().first().enabled:
             return states.enter_order_payment_type(_, bot, chat_id)
         else:
@@ -722,17 +738,17 @@ def on_order_date_select(bot, update, user_data):
         day = int(val)
         year, month = user_data['calendar']['year'], user_data['calendar']['month']
         now = datetime.datetime.now()
+        il_tz = timezone('Asia/Jerusalem')
+        now = il_tz.localize(now)
         order_datetime = now.replace(year=year, month=month, day=day)
         if order_datetime < now:
             msg = _('Delivery date can\'t be before current date')
-            print(msg)
             query.answer(msg)
             return enums.BOT_CHECKOUT_DATE_SELECT
         try:
             WorkingHours.get(day=order_datetime.weekday())
         except WorkingHours.DoesNotExist:
             msg = _('Please select day according to working days')
-            print(msg)
             query.answer(msg, show_alert=True)
             return enums.BOT_CHECKOUT_DATE_SELECT
         user_data['order_details']['datetime'] = order_datetime
@@ -778,13 +794,13 @@ def on_order_time_select(bot, update, user_data):
             return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id, msg, cancel=True)
         order_datetime = datetime.datetime(year=order_date.year, month=order_date.month, day=order_date.day, hour=hour, minute=minute)
         now = datetime.datetime.now()
+        now = timezone('Asia/Jerusalem').localize(now)
         if order_datetime.day == now.day and now > order_datetime:
             msg = _('Time should be later than current')
             query.answer(msg)
             return enums.BOT_CHECKOUT_TIME_SELECT
         user_data['order_details']['datetime'] = order_datetime
         user = User.get(telegram_id=user_id)
-        now = datetime.datetime.now()
         id_stages = None
         if not user.is_registered:
             id_stages = IdentificationStage.select().where(IdentificationStage.active == True)
@@ -1080,7 +1096,9 @@ def on_order_confirm(bot, update, user_data):
             lat, long = coordinates['lat'], coordinates['long']
             order.coordinates = lat + '|' + long + '|'
         total = Cart.fill_order(user_data, order, user)
-        delivery_fee = shortcuts.calculate_delivery_fee(delivery_method, location, total, user.is_vip_client)
+        delivery_permissions = [item.permission for item in DeliveryFeePermission.select()]
+        delivery_permitted = user.permission in delivery_permissions
+        delivery_fee = shortcuts.calculate_delivery_fee(delivery_method, location, total, delivery_permitted)
         discount = calculate_discount(total)
         order.delivery_fee = delivery_fee
         order.total_cost = total
@@ -1308,12 +1326,12 @@ def on_registration_repeat(bot, update, user_data):
             msg += escape_markdown(question.content)
             if first_stage.type == 'phone':
                 reply_markup = keyboards.phone_number_request_keyboard(_)
-                state = enums.BOT_IDENTIFICATION_PHONE
+                bot.send_message(chat_id, msg, reply_markup=reply_markup)
+                return enums.BOT_IDENTIFICATION_PHONE
             else:
                 reply_markup = keyboards.back_cancel_keyboard(_)
-                state = enums.BOT_IDENTIFICATION
-            bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
-            return state
+                bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+                return enums.BOT_IDENTIFICATION
         else:
             msg = _('Registration is not allowed now')
             bot.edit_message_text(msg, chat_id, msg_id)
@@ -1377,6 +1395,13 @@ def on_registration_identification(bot, update, user_data):
             answer = None
     else:
         answer = update.message.text
+        if answer_type == 'id':
+            answer = answer.replace(' ', '')
+            match = re.search(r'^\d{9}$', answer)
+            if not match:
+                msg = _('Please enter correct ID number (9 numbers)')
+                bot.send_message(chat_id, msg, reply_markup=keyboards.back_cancel_keyboard(_))
+                return enums.BOT_IDENTIFICATION
     # trans here
     if not answer:
         text = _(answer_type)
@@ -1416,6 +1441,10 @@ def on_registration_identification(bot, update, user_data):
         user.save()
         msg = _('Thank you for registration! Your application will be reviewed by admin.')
         bot.send_message(chat_id, msg)
+        msg = get_channel_trans()('User @{} just registered').format(user.username)
+        msg = bot.send_message(get_service_channel(), msg)
+        user.registration_msg_id = msg['message_id']
+        user.save()
         if not config.only_for_registered:
             return states.enter_menu(bot, update, user_data)
         else:
@@ -1503,6 +1532,11 @@ def on_registration_identification_phone(bot, update, user_data):
         user.save()
         msg = _('Thank you for registration! Your application will be reviewed by admin.')
         bot.send_message(chat_id, msg, reply_markup=ReplyKeyboardRemove())
+        msg = get_channel_trans()('User @{} just registered').format(user.username)
+        msg = bot.send_message(get_service_channel(), msg)
+        user.registration_msg_id = msg['message_id']
+        print(user.registration_msg_id)
+        user.save()
         if not config.only_for_registered:
             return states.enter_menu(bot, update, user_data)
         else:
@@ -1923,7 +1957,7 @@ def on_service_order_message(bot, update, user_data):
                     btc_data = OrderBtcPayment.get(order=order)
                 except OrderBtcPayment.DoesNotExist:
                     btc_data = None
-                msg = messages.create_service_notice(_, order, btc_data)
+                msg = messages.create_service_notice(_, order, btc_data, for_courier=True)
                 shortcuts.send_channel_msg(bot, msg, couriers_channel, keyboard, order)
                 query.answer(text=_('Order sent to couriers channel'), show_alert=True)
         query.answer(text=_('You have disabled courier\'s option'), show_alert=True)
@@ -2002,15 +2036,15 @@ def on_service_order_message(bot, update, user_data):
                     msg = _('{}\nFrom @{}:').format(time_sent, chat_msg.author.username)
                     msg_data = chat_msg.message
                     msg_type = chat_msg.msg_type
-                    if msg_type == 'photo':
-                        shortcuts.send_channel_photo(bot, msg_data, chat_id, caption=msg, order=order)
-                    elif msg_type == 'video':
-                        shortcuts.send_channel_video(bot, msg_data, chat_id, caption=msg, order=order)
-                    else:
+                    if msg_type == 'text':
                         msg += '\n'
                         msg += msg_data
                         shortcuts.send_channel_msg(bot, msg, chat_id, order=order, parse_mode=None)
-
+                    else:
+                        msg += '\n'
+                        msg += chat_msg.caption
+                        func = getattr(shortcuts, 'send_channel_{}'.format(msg_type))
+                        func(bot, msg_data, chat_id, caption=msg, order=order)
                 location = order.location.title if order.location else '-'
                 msg = _('Order №{}, Location {}\nUser @{}').format(order_id, location, order.user.username)
                 reply_markup = keyboards.show_order_keyboard(_, order.id)
@@ -2170,9 +2204,9 @@ def on_order_review(bot, update, user_data):
         user = User.get(telegram_id=user_id)
         review = Review.create(user=user, order=order, text=text)
         answers = review_data['answers']
-        for q_id, rank in answers.items():
-            question = ReviewQuestion.get(id=q_id)
-            ReviewQuestionRank.create(question=question, review=review, rank=rank)
+        for q in ReviewQuestion.select():
+            rank = answers.get(q.id, 5)
+            ReviewQuestionRank.create(question=q, review=review, rank=rank)
         msg = _('Thank you. Review is sent!')
         bot.edit_message_text(msg, chat_id, msg_id)
         return states.enter_menu(bot, update, user_data, query_id=query.id)
@@ -2290,6 +2324,7 @@ def service_channel_courier_query_handler(bot, update, user_data):
             else:
                 shortcuts.change_order_products_credits(order, courier=courier)
                 order.courier = courier
+                order.picked_by_courier = True
                 order.save()
                 keyboard = keyboards.courier_assigned_keyboard(courier_nickname, _)
                 assigned_msg_id = shortcuts.edit_channel_msg(bot, query.message.text, chat_id, msg_id, keyboard, order)
@@ -2353,6 +2388,7 @@ def on_courier_unconfirm(bot, update, user_data):
     else:
         shortcuts.change_order_products_credits(order, True, order.courier)
         order.courier = None
+        order.picked_by_courier = False
         order.save()
         msg = _('The admin did not confirm. Please retake '
                 'responsibility for order №{}').format(order_id)
@@ -2370,12 +2406,12 @@ def on_courier_unconfirm(bot, update, user_data):
         order_location = order.location
         if order_location:
             order_location = order_location.title
-        keyboard = keyboards.service_notice_keyboard(order_id, _, answers_ids, order_location, shipping_method)
+        keyboard = keyboards.service_notice_keyboard(order_id, _, msgs_ids, order_location, shipping_method)
         try:
             btc_data = OrderBtcPayment.get(order=order)
         except OrderBtcPayment.DoesNotExist:
             btc_data = None
-        msg = messages.create_service_notice(_, order, btc_data)
+        msg = messages.create_service_notice(_, order, btc_data, for_courier=True)
         shortcuts.send_channel_msg(bot, msg, couriers_channel, keyboard, order)
 
 
@@ -2488,7 +2524,8 @@ def on_time_picker_change(bot, update, user_data):
     else:
         action = query.data
         start_time, end_time = time_data['range']
-        picked_time = datetime.datetime.today().replace(hour=hour, minute=minute)
+        picked_time = timezone('Asia/Jerusalem').localize(datetime.datetime.now())\
+            .replace(hour=hour, minute=minute, second=0, microsecond=0)
         if action.startswith('time_picker_hour'):
             delta = datetime.timedelta(hours=1)
             if action == 'time_picker_hour_next':

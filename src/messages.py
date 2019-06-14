@@ -234,10 +234,12 @@ def get_payment_status_msg(trans, status, balance, stage):
 
 def create_service_notice(_, order, btc_data=None, for_courier=False):
     currency = get_currency_symbol()
+    order_received = order.date_created.strftime('%b %d, %Y (%A) %H:%M')
     text = _('Order №{} notice:').format(order.id)
     text += '\n'
     text += '〰〰〰〰〰〰〰〰〰〰〰〰️'
     text += '\n'
+    text += _('Order received: {}').format(order_received)
     text += _('Items in cart:')
     text += '\n'
 
@@ -575,3 +577,4 @@ def create_statistics_msg(_, orders):
     msg += '\n'
     msg += _('*Total cost: {}*').format(price)
     return msg
+

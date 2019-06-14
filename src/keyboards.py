@@ -5,6 +5,7 @@ import random
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from peewee import JOIN
+from pytz import timezone
 
 from .cart_helper import Cart
 from .helpers import config
@@ -361,7 +362,9 @@ def time_picker_keyboard(_, hour=0, minute=0, cancel=False):
 def calendar_keyboard(year, month, _, cancel=False, first_date=None):
     markup = []
     row = []
-    current_date = datetime.date.today()
+    current_date = datetime.datetime.now()
+    il_tz = timezone('Asia/Jerusalem')
+    current_date = il_tz.localize(current_date)
     if year > 1:
         row.append(InlineKeyboardButton('<', callback_data='calendar_previous_year'))
     row.append(InlineKeyboardButton(year, callback_data='year|{}'.format(year)))
@@ -444,6 +447,7 @@ def bot_settings_logistic_manager_keyboard(_, allowed):
     buttons.append([InlineKeyboardButton(_('↩ Back'), callback_data='bot_settings_back')])
     return InlineKeyboardMarkup(buttons)
 
+
 def advertisments_keyboard(_):
     buttons = [
         [InlineKeyboardButton(_('➕ Create advertisment'), callback_data='ads_create')],
@@ -451,6 +455,15 @@ def advertisments_keyboard(_):
         [InlineKeyboardButton(_('↩ Back'), callback_data='ads_back')]
     ]
     return InlineKeyboardMarkup(buttons)
+
+
+# def advertisments_target_keyboard(_):
+#     buttons = [
+#         [InlineKeyboardButton(_('👨 Users'), callback_data='ads_users')],
+#         [InlineKeyboardButton(_('⭐️ Channels'), callback_data='ads_channels')],
+#         [InlineKeyboardButton(_('↩ Back'), callback_data='ads_back')]
+#     ]
+#     return InlineKeyboardMarkup(buttons)
 
 
 def lottery_main_settings_keyboard(_):
@@ -538,9 +551,11 @@ def edit_messages_keyboard(_):
 
 
 def clients_keyboard(_, user):
+    pending_count = User.select().join(UserPermission, JOIN.LEFT_OUTER)\
+        .where(UserPermission.permission == UserPermission.PENDING_REGISTRATION, User.banned == False).count()
     buttons = [
         [InlineKeyboardButton(_('👩 Registered users'), callback_data='users_registered')],
-        [InlineKeyboardButton(_('🙋‍ Pending registrations'), callback_data='users_pending')],
+        [InlineKeyboardButton(_('🙋‍ Pending registrations ({})').format(pending_count), callback_data='users_pending')],
         [InlineKeyboardButton(_('🔒 Black-list'), callback_data='users_black_list')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='users_back')]
     ]
@@ -585,6 +600,7 @@ def registered_user_keyboard(_):
     buttons = [
         [InlineKeyboardButton(_('🎫 Show registration'), callback_data='registration_show')],
         [InlineKeyboardButton(_('🚪 Remove registration'), callback_data='registration_remove')],
+        [InlineKeyboardButton(_('🧾 Show orders'), callback_data='registration_orders')],
         [InlineKeyboardButton(_('⭐️ Change user status'), callback_data='registration_status')],
         [InlineKeyboardButton(_('🔒  Black-list user'), callback_data='registration_black_list')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='registration_back')]
@@ -788,11 +804,9 @@ def bot_orders_keyboard(trans):
 
 
 def delivery_fee_keyboard(_):
-    vip_delivery = config.delivery_fee_for_vip
-    vip_str = _('✅ Yes') if vip_delivery else _('⛔️ No')
     buttons = [
         [InlineKeyboardButton(_('➕ Add delivery fee'), callback_data='add')],
-        [InlineKeyboardButton(_('🎖 Vip customers delivery fee: {}').format(vip_str), callback_data='vip')],
+        [InlineKeyboardButton(_('👨‍👨‍👧‍👦 Special clients'), callback_data='perms')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
     ]
     return InlineKeyboardMarkup(buttons)
@@ -912,6 +926,14 @@ def general_select_one_keyboard(_, objects, page_num=1, page_len=10, cancel=Fals
         buttons.append([InlineKeyboardButton(_('❌ Cancel'), callback_data='cancel|')])
     return InlineKeyboardMarkup(buttons)
 
+
+def select_users_keyboard(_):
+    buttons = [
+        [InlineKeyboardButton(_('Search users'), callback_data='search')],
+        [InlineKeyboardButton(_('Select user'), callback_data='select')],
+        [InlineKeyboardButton(_('↩ Back'), callback_data='back|')]
+    ]
+    return InlineKeyboardMarkup(buttons)
 
 def couriers_choose_keyboard(trans, couriers, order_id, message_id):
     _ = trans
@@ -1180,6 +1202,7 @@ def create_categories_keyboard(trans):
     buttons = [
         [InlineKeyboardButton(_('🏪 Add products to category'), callback_data='products')],
         [InlineKeyboardButton(_('➕ Add Category'), callback_data='add')],
+        [InlineKeyboardButton(_('✏ Edit category'), callback_data='edit')],
         [InlineKeyboardButton(_('❌ Remove Category'), callback_data='remove')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='back')]
     ]
@@ -1328,6 +1351,7 @@ def edit_ad_keyboard(_):
         [InlineKeyboardButton(_('🖼 Edit media'), callback_data='ad_media')],
         [InlineKeyboardButton(_('⏱ Edit interval'), callback_data='ad_interval')],
         [InlineKeyboardButton(_('⭐️ Edit channels'), callback_data='ad_channels')],
+        [InlineKeyboardButton(_('👨 Edit users'), callback_data='ad_users')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='ad_back')]
     ]
     return InlineKeyboardMarkup(buttons)

@@ -9,7 +9,7 @@ from . import keyboards, messages, enums, shortcuts
 from .cart_helper import Cart
 from .models import Location, User, OrderBtcPayment, Channel, UserPermission, CourierLocation, \
     Product, WorkingHours, GroupProductCount, ProductCount, GroupProductCountPermission, Order, UserGroupCount, ProductGroupCount, \
-    LotteryParticipant, LotteryPermission
+    LotteryParticipant, LotteryPermission, DeliveryFeePermission
 from .helpers import config, get_user_id, get_trans, logger, get_currency_symbol
 from .btc_settings import BtcSettings
 from .btc_wrapper import CurrencyConverter
@@ -560,7 +560,9 @@ def enter_order_confirmation(_, bot, chat_id, user_data, user_id, msg_id=None, q
         location = Location.get(id=location_id)
     except Location.DoesNotExist:
         location = None
-    delivery_fee = shortcuts.calculate_delivery_fee(order_details['delivery'], location, total, user.is_vip_client)
+    delivery_permissions = [item.permission for item in DeliveryFeePermission.select()]
+    delivery_permitted = user.permission in delivery_permissions
+    delivery_fee = shortcuts.calculate_delivery_fee(order_details['delivery'], location, total, delivery_permitted)
     if delivery_fee:
         delivery_fee = CurrencyConverter.convert_currencies(delivery_fee, config.currency, user.currency)
     text, btc_value = messages.create_confirmation_text(user_id, order_details, total, products_info, delivery_fee)
@@ -637,20 +639,26 @@ def enter_price_group_selected(_, bot, chat_id, group_id, msg_id=None, query_id=
     return enums.ADMIN_PRODUCT_PRICE_GROUP_SELECTED
 
 
-def enter_statistics_user_select(_, bot, chat_id, msg_id, query_id, page=1, msg=None):
+def enter_statistics_user_select(_, bot, chat_id, msg_id=None, query_id=None, page=1, msg=None, username=None):
     if msg is None:
         msg = _('Select user')
     client_perms = [
         UserPermission.AUTHORIZED_RESELLER, UserPermission.FRIEND, UserPermission.VIP_CLIENT,
         UserPermission.CLIENT, UserPermission.NOT_REGISTERED, UserPermission.PENDING_REGISTRATION,
-        # comment out this
         UserPermission.OWNER, UserPermission.COURIER
     ]
+    db_query = [User.banned == False, UserPermission.permission.in_(client_perms)]
+    if username:
+        db_query.append(User.username.contains(username))
     users = User.select(User.username, User.id).join(UserPermission) \
-        .where(User.banned == False, UserPermission.permission.in_(client_perms)).tuples()
+        .where(*db_query).tuples()
     reply_markup = keyboards.general_select_one_keyboard(_, users, page)
-    bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
-    bot.answer_callback_query(query_id)
+    if msg_id:
+        bot.edit_message_text(msg, chat_id, msg_id, reply_markup=reply_markup)
+    else:
+        bot.send_message(chat_id, msg, reply_markup=reply_markup)
+    if query_id:
+        bot.answer_callback_query(query_id)
     return enums.ADMIN_STATISTICS_USER_SELECT
 
 

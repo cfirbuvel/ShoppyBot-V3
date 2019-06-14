@@ -1,7 +1,9 @@
+from telegram import ParseMode
+
 from .decorators import user_passes
-from .helpers import get_channel_trans, get_trans, get_user_id, get_service_channel
-from .models import Order, User, CourierChatMessage, CourierChat
-from . import shortcuts, enums, keyboards, states
+from .helpers import get_channel_trans, get_trans, get_user_id, get_service_channel, get_couriers_channel
+from .models import Order, User, CourierChatMessage, CourierChat, OrderBtcPayment
+from . import shortcuts, enums, keyboards, states, messages
 
 
 @user_passes
@@ -143,21 +145,30 @@ def on_courier_chat_send(bot, update, user_data):
             if msg_data:
                 break
         status_msg = _('Message has been sent.')
+        params = {}
         if msg_type in ('video', 'photo'):
             if type(msg_data) == list:
                 msg_data = msg_data[-1]
             msg_data = msg_data.file_id
+            caption = update.message.caption or ''
+            msg_caption = caption + '\n'
+            msg_caption += status_msg
             if msg_type == 'video':
-                sent_msg = bot.send_video(chat_id, msg_data, caption=status_msg)
+                sent_msg = bot.send_video(chat_id, msg_data, caption=msg_caption)
             else:
-                sent_msg = bot.send_photo(chat_id, msg_data, caption=status_msg)
+                sent_msg = bot.send_photo(chat_id, msg_data, caption=msg_caption)
+            # status_msg_id = bot.send_message(chat_id, status_msg)['message_id']
+            params['caption'] = caption
         else:
             msg = msg_data
             msg += '\n\n'
             msg += status_msg
             sent_msg = bot.send_message(chat_id, msg)
-        chat_msg = CourierChatMessage.create(chat=chat, msg_type=msg_type, message=msg_data,
-                                             sent_msg_id=sent_msg['message_id'], author=user)
+        params.update({
+            'chat': chat, 'msg_type': msg_type, 'message': msg_data, 'sent_msg_id': sent_msg['message_id'],
+            'author': user
+        })
+        chat_msg = CourierChatMessage.create(**params)
         client = order.user
         client_id = client.telegram_id
         user_trans = get_trans(client_id)
@@ -201,13 +212,19 @@ def on_open_chat_msg(bot, update, user_data):
     client_msg = chat_msg.message
     if msg_type in ('video', 'photo'):
         bot.delete_message(chat_id, msg_id)
-        caption = _('From client')
+        msg = _('From courier')
+        bot.send_message(chat_id, msg)
+        caption = chat_msg.caption
         if msg_type == 'video':
             bot.send_video(chat_id, client_msg, caption=caption)
-            bot.edit_message_caption(client_id, client_msg_id, caption=read_msg)
+            # bot.edit_message_caption(courier.telegram_id, courier_msg_id, caption=read_msg)
         else:
             bot.send_photo(chat_id, client_msg, caption=caption)
-            bot.edit_message_caption(client_id, client_msg_id, caption=read_msg)
+            # bot.edit_message_caption(courier.telegram_id, courier_msg_id, caption=read_msg)
+        caption += '\n'
+        caption += read_msg
+        bot.edit_message_caption(client_id, client_msg_id, caption=caption)
+        # bot.edit_message_text(read_msg, client.telegram_id, chat_msg.status_msg_id)
     else:
         open_msg = _('From client:')
         open_msg += '\n\n'
@@ -294,13 +311,40 @@ def on_drop_order(bot, update, user_data):
             shortcuts.change_order_products_credits(order, True)
         order.status = Order.CONFIRMED
         order.courier = None
-        order.save()
         msg = _('Order №{} was dropped!').format(order.id)
         bot.delete_message(chat_id, msg_id)
         bot.edit_message_text(msg, chat_id, main_msg_id)
         _ = get_channel_trans()
-        msg = _('Order №{} was dropped by @{}.').format(order.id, user.username)
-        shortcuts.send_channel_msg(bot, msg, get_service_channel(), order=order, parse_mode=None)
+        if order.picked_by_courier:
+            couriers_channel = get_couriers_channel()
+            msg = _('Courier @{} has dropped order. Please retake '
+                    'responsibility for order №{}').format(user.username, order_id)
+            shortcuts.send_channel_msg(bot, msg, couriers_channel, order=order, parse_mode=None)
+            msgs_ids = ''
+            if len(order.identification_answers):
+                answers_ids = shortcuts.send_order_identification_answers(bot, couriers_channel, order, send_one=True,
+                                                                          channel=True)
+                msgs_ids += ','.join(answers_ids)
+            if order.coordinates:
+                lat, lng = order.coordinates.split('|')[:2]
+                coords_msg_id = shortcuts.send_channel_location(bot, chat_id, lat, lng)
+                msgs_ids += ',' + coords_msg_id
+            shipping_method = order.shipping_method
+            order_location = order.location
+            if order_location:
+                order_location = order_location.title
+            keyboard = keyboards.service_notice_keyboard(order_id, _, msgs_ids, order_location, shipping_method)
+            try:
+                btc_data = OrderBtcPayment.get(order=order)
+            except OrderBtcPayment.DoesNotExist:
+                btc_data = None
+            msg = messages.create_service_notice(_, order, btc_data, for_courier=True)
+            shortcuts.send_channel_msg(bot, msg, couriers_channel, keyboard, order)
+            order.picked_by_courier = False
+        else:
+            msg = _('Order №{} was dropped by @{}.').format(order.id, user.username)
+            shortcuts.send_channel_msg(bot, msg, get_service_channel(), order=order, parse_mode=None)
+        order.save()
         query.answer()
         return enums.BOT_INIT
     elif action == 'no':

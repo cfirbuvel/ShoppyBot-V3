@@ -247,6 +247,13 @@ def main():
             enums.ADMIN_STATISTICS_USERS: [
                 CallbackQueryHandler(admin_handlers.on_statistics_users, pattern='^(clients|back)', pass_user_data=True),
             ],
+            enums.ADMIN_STATISTICS_ALL_CLIENTS: [
+                CallbackQueryHandler(admin_handlers.on_statistics_all_clients, pattern='^(back|select|search)', pass_user_data=True)
+            ],
+            enums.ADMIN_STATISTICS_USER_SEARCH: [
+                CallbackQueryHandler(admin_handlers.on_statistics_user_search, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_statistics_user_search, pass_user_data=True)
+            ],
             enums.ADMIN_STATISTICS_USER_SELECT: [
                 CallbackQueryHandler(admin_handlers.on_statistics_user_select, pattern='^(back|page|select)', pass_user_data=True)
             ],
@@ -422,11 +429,18 @@ def main():
                 MessageHandler(Filters.text, admin_handlers.on_warehouse_courier_edit, pass_user_data=True)
             ],
             enums.ADMIN_CATEGORIES: [
-                CallbackQueryHandler(admin_handlers.on_admin_categories, pattern='^(back|add|products|remove)', pass_user_data=True),
+                CallbackQueryHandler(admin_handlers.on_admin_categories, pattern='^(back|add|edit|products|remove)', pass_user_data=True),
             ],
             enums.ADMIN_CATEGORY_ADD: [
                 CallbackQueryHandler(admin_handlers.on_admin_category_add, pattern='^back', pass_user_data=True),
                 MessageHandler(Filters.text, admin_handlers.on_admin_category_add, pass_user_data=True)
+            ],
+            enums.ADMIN_CATEGORY_EDIT: [
+                CallbackQueryHandler(admin_handlers.on_admin_category_edit, pattern='^(back|select|page)', pass_user_data=True),
+            ],
+            enums.ADMIN_CATEGORY_EDIT_NAME: [
+                CallbackQueryHandler(admin_handlers.on_admin_category_edit_name, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_admin_category_edit_name, pass_user_data=True)
             ],
             enums.ADMIN_CATEGORY_PRODUCTS_SELECT: [
                 CallbackQueryHandler(admin_handlers.on_admin_category_products_select, pattern='^(back|page|select)', pass_user_data=True)
@@ -486,6 +500,9 @@ def main():
             enums.ADMIN_CREATE_AD_CHANNELS: [
                 CallbackQueryHandler(admin_handlers.on_create_ad_channels, pattern='^(done|select)', pass_user_data=True)
             ],
+            enums.ADMIN_CREATE_AD_USERS: [
+                CallbackQueryHandler(admin_handlers.on_create_ad_users, pattern='^(done|select|page)', pass_user_data=True)
+            ],
             enums.ADMIN_CREATE_AD_INTERVAL: [
                 CallbackQueryHandler(admin_handlers.on_create_ad_interval, pattern='^(back|cancel)', pass_user_data=True),
                 MessageHandler(Filters.text, admin_handlers.on_create_ad_interval, pass_user_data=True)
@@ -518,6 +535,9 @@ def main():
             enums.ADMIN_AD_EDIT_CHANNELS: [
                 CallbackQueryHandler(admin_handlers.on_ad_edit_channels, pattern='^(done|select)', pass_user_data=True)
             ],
+            enums.ADMIN_AD_EDIT_USERS: [
+                CallbackQueryHandler(admin_handlers.on_ad_edit_users, pattern='^(done|select|page)', pass_user_data=True)
+            ],
             enums.ADMIN_USERS: [
                 CallbackQueryHandler(admin_handlers.on_users, pattern='^users', pass_user_data=True),
                 CommandHandler('cancel', admin_handlers.on_cancel)
@@ -532,6 +552,9 @@ def main():
             enums.ADMIN_REGISTERED_USERS_SELECT: [
                 CallbackQueryHandler(admin_handlers.on_registered_users_select, pattern='^registration', pass_user_data=True),
                 CommandHandler('cancel', admin_handlers.on_cancel)
+            ],
+            enums.ADMIN_REGISTERED_USERS_ORDERS: [
+                CallbackQueryHandler(admin_handlers.on_registered_users_orders, pattern='^(back|select|page)', pass_user_data=True)
             ],
             enums.ADMIN_REGISTERED_USERS_STATUS: [
                 CallbackQueryHandler(admin_handlers.on_registered_users_status, pattern='^(back|select)', pass_user_data=True),
@@ -617,7 +640,7 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_delivery_methods, pattern='^(back|pickup|delivery|both)', pass_user_data=True)
             ],
             enums.ADMIN_DELIVERY_FEE: [
-                CallbackQueryHandler(admin_handlers.on_delivery_fee, pattern='^(back|add|vip)', pass_user_data=True)
+                CallbackQueryHandler(admin_handlers.on_delivery_fee, pattern='^(back|add|perms)', pass_user_data=True)
             ],
             enums.ADMIN_DELIVERY_FEE_ADD: [
                 CallbackQueryHandler(admin_handlers.on_delivery_fee_add, pattern='^(back|all|select)', pass_user_data=True)
@@ -629,7 +652,9 @@ def main():
                 CallbackQueryHandler(admin_handlers.on_delivery_fee_enter, pattern='^back', pass_user_data=True),
                 MessageHandler(Filters.text, admin_handlers.on_delivery_fee_enter, pass_user_data=True)
             ],
-
+            enums.ADMIN_DELIVERY_FEE_PERMISSIONS: [
+                CallbackQueryHandler(admin_handlers.on_delivery_fee_permissions, pattern='^(done|select)', pass_user_data=True),
+            ],
             enums.ADMIN_INIT: [
                 CommandHandler('cancel', admin_handlers.on_cancel),
                 MessageHandler(Filters.all, admin_handlers.on_admin_fallback),
@@ -652,8 +677,15 @@ def main():
             enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS: [
                 CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients, pattern='^(back|done|select)', pass_user_data=True)
             ],
-            enums.ADMIN_PRODUCT_PRICE_GROUP_CLIENTS_USERS: [
-                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_clients_users, pattern='^(back|done|select)', pass_user_data=True)
+            enums.ADMIN_PRODUCT_PRICE_GROUP_USERS: [
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_users, pattern='^(back|select|search)', pass_user_data=True)
+            ],
+            enums.ADMIN_PRODUCT_PRICE_GROUP_USERS_SEARCH: [
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_users_search, pattern='^back', pass_user_data=True),
+                MessageHandler(Filters.text, admin_handlers.on_admin_product_price_group_users_search, pass_user_data=True)
+            ],
+            enums.ADMIN_PRODUCT_PRICE_GROUP_USERS_SELECT: [
+                CallbackQueryHandler(admin_handlers.on_admin_product_price_group_users_select, pattern='^(back|done|select)', pass_user_data=True)
             ],
             enums.ADMIN_PRODUCT_PRICE_GROUP_CHANGE: [
                 MessageHandler(Filters.text, admin_handlers.on_admin_product_price_group_change, pass_user_data=True),
