@@ -89,7 +89,6 @@ class WorkingHours(BaseModel):
     close_time = TimeField()
 
     def get_day_display(self):
-        print(dict(self.DAYS))
         return dict(self.DAYS)[self.day]
 
 
@@ -444,7 +443,7 @@ class CourierChatMessage(BaseModel):
     chat = ForeignKeyField(CourierChat, related_name='messages')
     msg_type = CharField()
     message = CharField()
-    caption = CharField()
+    caption = CharField(null=True)
     author = ForeignKeyField(User, related_name='read_messages')
     replied = BooleanField(default=False)
     read = BooleanField(default=False)

@@ -14,6 +14,11 @@ def on_courier_menu(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action, order_id = query.data.split('|')
     order = Order.get(id=order_id)
+    if order.status in (Order.DELIVERED, Order.CANCELLED):
+        msg = _('Order was {} already').format(order.get_status_display())
+        bot.edit_message_text(msg, chat_id, msg_id)
+        query.answer()
+        return enums.BOT_INIT
     user = User.get(telegram_id=user_id)
     if order.courier != user:
         msg = _('You are not responsible for this order anymore')
@@ -72,6 +77,11 @@ def on_courier_chat(bot, update, user_data):
     chat_id, msg_id = query.message.chat_id, query.message.message_id
     action, order_id = query.data.split('|')
     order = Order.get(id=order_id)
+    if order.status in (Order.DELIVERED, Order.CANCELLED):
+        msg = _('Order was {} already').format(order.get_status_display())
+        bot.edit_message_text(msg, chat_id, msg_id)
+        query.answer()
+        return enums.BOT_INIT
     user = User.get(telegram_id=user_id)
     if order.courier != user:
         msg = _('You are not responsible for this order anymore')
@@ -105,7 +115,7 @@ def on_courier_chat(bot, update, user_data):
         msg = user_trans('Order №{}:').format(order_id)
         msg += '\n'
         msg = user_trans('Courier has ended a chat.')
-        bot.send_message(client_id, msg)
+        bot.send_message(client_id, msg, reply_markup=keyboards.start_btn(user_trans))
         msg = _('Chat has been ended.')
         query.answer(msg)
         return states.enter_courier_main_menu(_, bot, chat_id, user, order, msg_id, query.id)
@@ -120,6 +130,11 @@ def on_courier_chat_send(bot, update, user_data):
     order_id = user_data['chat_order_id']
     user = User.get(telegram_id=user_id)
     order = Order.get(id=order_id)
+    if order.status in (Order.DELIVERED, Order.CANCELLED):
+        msg = _('Order was {} already').format(order.get_status_display())
+        bot.edit_message_text(msg, chat_id, msg_id)
+        query.answer()
+        return enums.BOT_INIT
     if order.courier != user:
         msg = _('You are not responsible for this order anymore')
         bot.send_message(chat_id, msg)
@@ -296,6 +311,11 @@ def on_drop_order(bot, update, user_data):
     order_id = user_data['courier_menu']['order_id']
     main_msg_id = user_data['courier_menu']['msg_id']
     order = Order.get(id=order_id)
+    if order.status in (Order.DELIVERED, Order.CANCELLED):
+        msg = _('Order was {} already').format(order.get_status_display())
+        bot.edit_message_text(msg, chat_id, msg_id)
+        query.answer()
+        return enums.BOT_INIT
     user = User.get(telegram_id=user_id)
     if order.courier != user:
         msg = _('You are not responsible for this order anymore')
@@ -364,6 +384,11 @@ def on_courier_confirm_order(bot, update, user_data):
     main_msg_id = user_data['courier_menu']['msg_id']
     user = User.get(telegram_id=user_id)
     order = Order.get(id=order_id)
+    if order.status in (Order.DELIVERED, Order.CANCELLED):
+        msg = _('Order was {}').format(order.get_status_display())
+        bot.edit_message_text(msg, chat_id, msg_id)
+        query.answer()
+        return enums.BOT_INIT
     if order.courier != user:
         msg = _('You are not responsible for this order anymore')
         bot.edit_message_text(msg, chat_id, msg_id)
@@ -460,6 +485,11 @@ def on_courier_ping_client(bot, update, user_data):
     order_id = user_data['courier_menu']['order_id']
     user = User.get(telegram_id=user_id)
     order = Order.get(id=order_id)
+    if order.status in (Order.DELIVERED, Order.CANCELLED):
+        msg = _('Order was {}').format(order.get_status_display())
+        bot.edit_message_text(msg, chat_id, msg_id)
+        query.answer()
+        return enums.BOT_INIT
     if order.courier != user:
         msg = _('You are not responsible for this order anymore')
         bot.edit_message_text(msg, chat_id, msg_id)

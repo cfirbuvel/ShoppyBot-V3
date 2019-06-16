@@ -151,6 +151,8 @@ def initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query_id, 
 
 def check_order_datetime_allowed(dtime):
     res = True
+    print('debug weekday')
+    print(dtime.weekday())
     try:
         working_day = WorkingHours.get(day=dtime.weekday())
     except WorkingHours.DoesNotExist:
@@ -159,7 +161,14 @@ def check_order_datetime_allowed(dtime):
         close_time = working_day.close_time
         close_time = datetime.datetime(year=dtime.year, month=dtime.month, day=dtime.day, hour=close_time.hour, minute=close_time.minute)
         close_time = timezone('Asia/Jerusalem').localize(close_time)
+        night_start = close_time.replace(hour=0, minute=0)
+        night_end = close_time.replace(hour=6, minute=0)
+        if night_start <= close_time <= night_end:
+            close_time += datetime.timedelta(days=1)
         close_time = close_time - datetime.timedelta(minutes=30)
+        # print('debug time')
+        # print(dtime)
+        # print(close_time)
         if not dtime < close_time:
             res = False
     return res

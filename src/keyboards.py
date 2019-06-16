@@ -10,7 +10,7 @@ from pytz import timezone
 from .cart_helper import Cart
 from .helpers import config
 from .models import Currencies, Channel, Location, Order, CourierLocation, User, UserPermission, CourierChat, Lottery, \
-    ReviewQuestion, AllowedSetting
+    ReviewQuestion, AllowedSetting, Review
 
 
 def confirmation_keyboard(_):
@@ -240,8 +240,9 @@ def settings_logistic_manager_keyboard(_, allowed):
 
 
 def reviews_settings_keyboard(_):
+    reviews_num = Review.select().where(Review.is_pending == True).count()
     buttons = [
-        [InlineKeyboardButton(_('📨 Pending reviews'), callback_data='reviews_pending')],
+        [InlineKeyboardButton(_('📨 Pending reviews ({})').format(reviews_num), callback_data='reviews_pending')],
         [InlineKeyboardButton(_('🌠 Show reviews'), callback_data='reviews_show')],
         [InlineKeyboardButton(_('🧾 Reviews questions'), callback_data='reviews_questions')],
         [InlineKeyboardButton(_('↩ Back'), callback_data='reviews_back')],

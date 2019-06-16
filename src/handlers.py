@@ -387,6 +387,13 @@ def on_chat_with_courier(bot, update, user_data):
         msg += '\n'
         msg = user_trans('Client has ended a chat.')
         bot.send_message(courier_id, msg)
+        try:
+            btc_data = OrderBtcPayment.get(order=order)
+        except OrderBtcPayment.DoesNotExist:
+            btc_data = None
+        msg = messages.create_service_notice(user_trans, btc_data, for_courier=False)
+        reply_markup = keyboards.courier_order_status_keyboard(user_trans, order.id, courier)
+        bot.send_message(courier_id, msg, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         msg = _('Chat has been ended.')
         query.answer(msg)
         return states.enter_menu(bot, update, user_data, msg_id)
@@ -2299,7 +2306,7 @@ def service_channel_courier_query_handler(bot, update, user_data):
         else:
             if order.location:
                 try:
-                    CourierLocation.get(courier=courier, location=order.location)
+                    CourierLocation.get(user=courier, location=order.location)
                 except CourierLocation.DoesNotExist:
                     query.answer(
                         text=_('{}\n your location and customer locations are different').format(courier_nickname),
