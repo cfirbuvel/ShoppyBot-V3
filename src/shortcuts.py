@@ -158,6 +158,7 @@ def check_order_datetime_allowed(dtime):
     else:
         close_time = working_day.close_time
         close_time = datetime.datetime(year=dtime.year, month=dtime.month, day=dtime.day, hour=close_time.hour, minute=close_time.minute)
+        close_time = timezone('Asia/Jerusalem').localize(close_time)
         close_time = close_time - datetime.timedelta(minutes=30)
         if not dtime < close_time:
             res = False

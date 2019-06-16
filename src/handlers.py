@@ -793,8 +793,10 @@ def on_order_time_select(bot, update, user_data):
             state = enums.BOT_CHECKOUT_DATE_SELECT
             return shortcuts.initialize_calendar(_, bot, user_data, chat_id, state, msg_id, query.id, msg, cancel=True)
         order_datetime = datetime.datetime(year=order_date.year, month=order_date.month, day=order_date.day, hour=hour, minute=minute)
+        israel_tz = timezone('Asia/Jerusalem')
+        order_datetime = israel_tz.localize(order_datetime)
         now = datetime.datetime.now()
-        now = timezone('Asia/Jerusalem').localize(now)
+        now = israel_tz.localize(now)
         if order_datetime.day == now.day and now > order_datetime:
             msg = _('Time should be later than current')
             query.answer(msg)
@@ -2526,6 +2528,8 @@ def on_time_picker_change(bot, update, user_data):
         start_time, end_time = time_data['range']
         picked_time = timezone('Asia/Jerusalem').localize(datetime.datetime.now())\
             .replace(hour=hour, minute=minute, second=0, microsecond=0)
+        print('debug picked')
+        print(picked_time)
         if action.startswith('time_picker_hour'):
             delta = datetime.timedelta(hours=1)
             if action == 'time_picker_hour_next':
