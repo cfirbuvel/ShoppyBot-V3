@@ -665,7 +665,8 @@ def on_order_datetime_select(bot, update, user_data):
                 id_stages = IdentificationStage.select().join(IdentificationPermission)\
                     .where(IdentificationStage.for_order == True, IdentificationStage.active == True,
                            IdentificationPermission.permission == user.permission)
-        if id_stages and id_stages.exists():            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
+        if id_stages and id_stages.exists():
+            return states.enter_order_identify(_, bot, chat_id, user_data, id_stages)
         if BitcoinCredentials.select().first().enabled:
             return states.enter_order_payment_type(_, bot, chat_id)
         else:
@@ -757,6 +758,14 @@ def on_order_date_select(bot, update, user_data):
         msg += '\n\n'
         msg += messages.get_working_hours_msg(_)
         working_hours = WorkingHours.get(day=order_datetime.weekday())
+        # open_time = working_hours.open_time
+        # open_time = datetime.datetime(year=year, month=month, day=day, minute=working_hours.open_time.minute,
+        #                               hour=working_hours.open_time.hour)
+        # close_time = working_hours.close_time
+        # close_time = datetime.datetime(year=year, month=month, day=day, minute=working_hours.close_time.minute,
+        #                                hour=working_hours.close_time.hour)
+        # if datetime.time(hour=0, minute=0) <= close_time.hour <= datetime.time(hour=6, minute=0):
+        #     close_time += datetime.timedelta(day=1)
         time_range = (working_hours.open_time, working_hours.close_time)
         return shortcuts.initialize_time_picker(_, bot, user_data, chat_id, state, msg_id, query.id, msg, time_range, cancel=True)
     elif action in ('year', 'month'):
@@ -2525,11 +2534,8 @@ def on_time_picker_change(bot, update, user_data):
         return states.enter_menu(bot, update, user_data)
     else:
         action = query.data
-        start_time, end_time = time_data['range']
         picked_time = timezone('Asia/Jerusalem').localize(datetime.datetime.now())\
             .replace(hour=hour, minute=minute, second=0, microsecond=0)
-        print('debug picked')
-        print(picked_time)
         if action.startswith('time_picker_hour'):
             delta = datetime.timedelta(hours=1)
             if action == 'time_picker_hour_next':
@@ -2545,8 +2551,17 @@ def on_time_picker_change(bot, update, user_data):
         else:
             query.answer()
             return state
-        picked_time = datetime.time(hour=picked_time.hour, minute=picked_time.minute)
+        start_time, end_time = time_data['range']
+        start_time = picked_time.replace(minute=start_time.minute, hour=start_time.hour)
+        night_start = picked_time.replace(hour=0, minute=0)
+        night_end = picked_time.replace(hour=6, minute=0)
+        end_time = picked_time.replace(minute=end_time.minute, hour=end_time.hour)
+        if night_start <= end_time <= night_end:
+            end_time += datetime.timedelta(days=1)
+        if night_start <= picked_time <= night_end:
+            picked_time += datetime.timedelta(days=1)
         if start_time <= picked_time <= end_time:
+            print('ok')
             hour, minute = picked_time.hour, picked_time.minute
             user_data['time_picker']['hour'] = hour
             user_data['time_picker']['minute'] = minute
